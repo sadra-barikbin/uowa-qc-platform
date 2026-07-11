@@ -8,7 +8,7 @@ const User = sequelize.define('User', {
     password:    { type: DataTypes.STRING, allowNull: false },
     full_name:   { type: DataTypes.STRING, allowNull: false },
     full_name_ar:{ type: DataTypes.STRING },
-    role:        { type: DataTypes.ENUM('admin','department_head','data_entry','viewer'), defaultValue: 'viewer' },
+    role:        { type: DataTypes.ENUM('admin', 'qc_head', 'dept_rep', 'viewer'), defaultValue: 'viewer' },
     is_active:   { type: DataTypes.BOOLEAN, defaultValue: true },
     avatar_url:  { type: DataTypes.STRING },
     last_login:  { type: DataTypes.DATE },
@@ -25,65 +25,104 @@ const College = sequelize.define('College', {
 
 // ── Department ────────────────────────────────────────────────
 const Department = sequelize.define('Department', {
-    id:        { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    name_en:   { type: DataTypes.STRING, allowNull: false },
-    name_ar:   { type: DataTypes.STRING, allowNull: false },
-    code:      { type: DataTypes.STRING(50), unique: true, allowNull: false },
-    is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
+    id:               { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name_en:          { type: DataTypes.STRING, allowNull: false },
+    name_ar:          { type: DataTypes.STRING, allowNull: false },
+    code:             { type: DataTypes.STRING(50), unique: true, allowNull: false },
+    drive_folder_url: { type: DataTypes.STRING(1000) },
+    is_active:        { type: DataTypes.BOOLEAN, defaultValue: true },
 }, { tableName: 'departments' });
 
-// ── MetricCategory ────────────────────────────────────────────
-const MetricCategory = sequelize.define('MetricCategory', {
-    id:         { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    name_en:    { type: DataTypes.STRING, allowNull: false },
-    name_ar:    { type: DataTypes.STRING, allowNull: false },
-    weight:     { type: DataTypes.DECIMAL(5, 4), defaultValue: 1.0 },
-    sort_order: { type: DataTypes.INTEGER, defaultValue: 0 },
-    is_active:  { type: DataTypes.BOOLEAN, defaultValue: true },
-}, { tableName: 'metric_categories' });
+// ── DepartmentUser (join) ────────────────────────────────────
+const DepartmentUser = sequelize.define('DepartmentUser', {
+    department_id:      { type: DataTypes.UUID, primaryKey: true },
+    user_id:             { type: DataTypes.UUID, primaryKey: true },
+    is_primary_contact: { type: DataTypes.BOOLEAN, defaultValue: false },
+    assigned_at:         { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+}, { tableName: 'department_users', timestamps: false });
 
-// ── Metric ────────────────────────────────────────────────────
-const Metric = sequelize.define('Metric', {
-    id:              { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    name_en:         { type: DataTypes.STRING, allowNull: false },
-    name_ar:         { type: DataTypes.STRING, allowNull: false },
-    description_en:  { type: DataTypes.TEXT },
-    description_ar:  { type: DataTypes.TEXT },
-    metric_type:     { type: DataTypes.STRING(50), defaultValue: 'percentage' },
-    max_value:       { type: DataTypes.DECIMAL(10, 2), defaultValue: 1.0 },
-    weight:          { type: DataTypes.DECIMAL(5, 4), defaultValue: 1.0 },
-    deadline_day:    { type: DataTypes.INTEGER },
-    is_required:     { type: DataTypes.BOOLEAN, defaultValue: true },
-    sort_order:      { type: DataTypes.INTEGER, defaultValue: 0 },
-    is_active:       { type: DataTypes.BOOLEAN, defaultValue: true },
-}, { tableName: 'metrics' });
+// ── Indicator ─────────────────────────────────────────────────
+const Indicator = sequelize.define('Indicator', {
+    id:             { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    code:           { type: DataTypes.STRING(50), unique: true, allowNull: false },
+    name_en:        { type: DataTypes.STRING, allowNull: false },
+    name_ar:        { type: DataTypes.STRING, allowNull: false },
+    description_en: { type: DataTypes.TEXT },
+    description_ar: { type: DataTypes.TEXT },
+    sort_order:     { type: DataTypes.INTEGER, defaultValue: 0 },
+    is_active:      { type: DataTypes.BOOLEAN, defaultValue: true },
+}, { tableName: 'indicators' });
 
-// ── ReportingPeriod ───────────────────────────────────────────
-const ReportingPeriod = sequelize.define('ReportingPeriod', {
-    id:       { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    year:     { type: DataTypes.INTEGER, allowNull: false },
-    month:    { type: DataTypes.INTEGER, allowNull: false, validate: { min: 1, max: 12 } },
-    label_en: { type: DataTypes.STRING(100) },
-    label_ar: { type: DataTypes.STRING(100) },
-    is_open:  { type: DataTypes.BOOLEAN, defaultValue: true },
-    deadline: { type: DataTypes.DATEONLY },
-}, { tableName: 'reporting_periods' });
+// ── IndicatorCriterion ────────────────────────────────────────
+const IndicatorCriterion = sequelize.define('IndicatorCriterion', {
+    id:                { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    code:              { type: DataTypes.STRING(50), allowNull: false },
+    name_en:           { type: DataTypes.STRING, allowNull: false },
+    name_ar:           { type: DataTypes.STRING, allowNull: false },
+    description_en:    { type: DataTypes.TEXT },
+    description_ar:    { type: DataTypes.TEXT },
+    criterion_type:    { type: DataTypes.ENUM('checklist', 'percentage', 'ratio', 'score_100'), defaultValue: 'checklist' },
+    weight:            { type: DataTypes.DECIMAL(5, 4), defaultValue: 1.0 },
+    config:            { type: DataTypes.JSONB, defaultValue: {} },
+    requires_evidence: { type: DataTypes.BOOLEAN, defaultValue: true },
+    sort_order:        { type: DataTypes.INTEGER, defaultValue: 0 },
+    is_active:         { type: DataTypes.BOOLEAN, defaultValue: true },
+}, { tableName: 'indicator_criteria' });
 
-// ── DataEntry ─────────────────────────────────────────────────
-const DataEntry = sequelize.define('DataEntry', {
+// ── EvaluationPeriod ──────────────────────────────────────────
+const EvaluationPeriod = sequelize.define('EvaluationPeriod', {
+    id:                  { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    year:                { type: DataTypes.INTEGER, allowNull: false },
+    month:               { type: DataTypes.INTEGER, allowNull: false, validate: { min: 1, max: 12 } },
+    label_en:            { type: DataTypes.STRING(100) },
+    label_ar:            { type: DataTypes.STRING(100) },
+    status:              { type: DataTypes.ENUM('draft', 'open', 'under_review', 'published', 'closed'), defaultValue: 'draft' },
+    submission_deadline: { type: DataTypes.DATE },
+}, { tableName: 'evaluation_periods' });
+
+// ── PeriodIndicator (join) ────────────────────────────────────
+const PeriodIndicator = sequelize.define('PeriodIndicator', {
+    id:          { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    weight:      { type: DataTypes.DECIMAL(5, 4), defaultValue: 1.0 },
+    sort_order:  { type: DataTypes.INTEGER, defaultValue: 0 },
+    is_active:   { type: DataTypes.BOOLEAN, defaultValue: true },
+}, { tableName: 'period_indicators' });
+
+// ── Submission ────────────────────────────────────────────────
+const Submission = sequelize.define('Submission', {
     id:            { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    value:         { type: DataTypes.DECIMAL(10, 4) },
+    status:        { type: DataTypes.ENUM('pending', 'submitted', 'needs_revision', 'reviewed'), defaultValue: 'pending' },
     notes:         { type: DataTypes.TEXT },
-    evidence_urls: { type: DataTypes.JSONB, defaultValue: [] },
-    status:        { type: DataTypes.STRING(50), defaultValue: 'draft' },
     submitted_at:  { type: DataTypes.DATE },
-    approved_at:   { type: DataTypes.DATE },
-}, { tableName: 'data_entries' });
+}, { tableName: 'submissions' });
+
+// ── SubmissionDocument ────────────────────────────────────────
+const SubmissionDocument = sequelize.define('SubmissionDocument', {
+    id:               { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    file_name:        { type: DataTypes.STRING(500), allowNull: false },
+    storage_provider: { type: DataTypes.ENUM('local', 'google_drive'), defaultValue: 'local' },
+    storage_path:     { type: DataTypes.STRING(1000), allowNull: false },
+    mime_type:        { type: DataTypes.STRING(100) },
+    size_bytes:       { type: DataTypes.INTEGER },
+    uploaded_at:      { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+}, { tableName: 'submission_documents', timestamps: false });
+
+// ── Evaluation ────────────────────────────────────────────────
+const Evaluation = sequelize.define('Evaluation', {
+    id:                { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    score:             { type: DataTypes.DECIMAL(5, 4), validate: { min: 0, max: 1 } },
+    raw_values:        { type: DataTypes.JSONB, defaultValue: {} },
+    reviewer_notes:    { type: DataTypes.TEXT },
+    evaluation_method: { type: DataTypes.ENUM('manual', 'ai'), defaultValue: 'manual' },
+    ai_confidence:     { type: DataTypes.DECIMAL(5, 4) },
+    ai_rationale:      { type: DataTypes.TEXT },
+    evaluated_at:      { type: DataTypes.DATE },
+}, { tableName: 'evaluations' });
 
 // ── Notification ──────────────────────────────────────────────
 const Notification = sequelize.define('Notification', {
     id:          { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    type:        { type: DataTypes.ENUM('missing_data','deadline','approval','system','reminder'), allowNull: false },
+    type:        { type: DataTypes.ENUM('missing_submission', 'deadline', 'review_needed', 'system', 'reminder'), allowNull: false },
     title_en:    { type: DataTypes.STRING(500), allowNull: false },
     title_ar:    { type: DataTypes.STRING(500) },
     message_en:  { type: DataTypes.TEXT },
@@ -96,23 +135,52 @@ const Notification = sequelize.define('Notification', {
 // ── Associations ──────────────────────────────────────────────
 College.hasMany(Department, { foreignKey: 'college_id', as: 'departments' });
 Department.belongsTo(College, { foreignKey: 'college_id', as: 'college' });
-College.belongsTo(User, { foreignKey: 'head_id', as: 'head' });
-Department.belongsTo(User, { foreignKey: 'head_id', as: 'head' });
 
-MetricCategory.hasMany(Metric, { foreignKey: 'category_id', as: 'metrics' });
-Metric.belongsTo(MetricCategory, { foreignKey: 'category_id', as: 'category' });
+Department.belongsToMany(User, { through: DepartmentUser, foreignKey: 'department_id', otherKey: 'user_id', as: 'representatives' });
+User.belongsToMany(Department, { through: DepartmentUser, foreignKey: 'user_id', otherKey: 'department_id', as: 'departments' });
 
-Department.hasMany(DataEntry, { foreignKey: 'department_id', as: 'entries' });
-Metric.hasMany(DataEntry, { foreignKey: 'metric_id', as: 'entries' });
-ReportingPeriod.hasMany(DataEntry, { foreignKey: 'period_id', as: 'entries' });
-DataEntry.belongsTo(Department, { foreignKey: 'department_id', as: 'department' });
-DataEntry.belongsTo(Metric, { foreignKey: 'metric_id', as: 'metric' });
-DataEntry.belongsTo(ReportingPeriod, { foreignKey: 'period_id', as: 'period' });
-DataEntry.belongsTo(User, { foreignKey: 'submitted_by', as: 'submitter' });
-DataEntry.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
+Indicator.hasMany(IndicatorCriterion, { foreignKey: 'indicator_id', as: 'criteria' });
+IndicatorCriterion.belongsTo(Indicator, { foreignKey: 'indicator_id', as: 'indicator' });
+
+EvaluationPeriod.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+Indicator.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+EvaluationPeriod.hasMany(PeriodIndicator, { foreignKey: 'period_id', as: 'period_indicators' });
+PeriodIndicator.belongsTo(EvaluationPeriod, { foreignKey: 'period_id', as: 'period' });
+Indicator.hasMany(PeriodIndicator, { foreignKey: 'indicator_id', as: 'period_indicators' });
+PeriodIndicator.belongsTo(Indicator, { foreignKey: 'indicator_id', as: 'indicator' });
+
+EvaluationPeriod.hasMany(Submission, { foreignKey: 'period_id', as: 'submissions' });
+Submission.belongsTo(EvaluationPeriod, { foreignKey: 'period_id', as: 'period' });
+Department.hasMany(Submission, { foreignKey: 'department_id', as: 'submissions' });
+Submission.belongsTo(Department, { foreignKey: 'department_id', as: 'department' });
+IndicatorCriterion.hasMany(Submission, { foreignKey: 'criterion_id', as: 'submissions' });
+Submission.belongsTo(IndicatorCriterion, { foreignKey: 'criterion_id', as: 'criterion' });
+Submission.belongsTo(User, { foreignKey: 'submitted_by', as: 'submitter' });
+
+Submission.hasMany(SubmissionDocument, { foreignKey: 'submission_id', as: 'documents' });
+SubmissionDocument.belongsTo(Submission, { foreignKey: 'submission_id', as: 'submission' });
+SubmissionDocument.belongsTo(User, { foreignKey: 'uploaded_by', as: 'uploader' });
+
+EvaluationPeriod.hasMany(Evaluation, { foreignKey: 'period_id', as: 'evaluations' });
+Evaluation.belongsTo(EvaluationPeriod, { foreignKey: 'period_id', as: 'period' });
+Department.hasMany(Evaluation, { foreignKey: 'department_id', as: 'evaluations' });
+Evaluation.belongsTo(Department, { foreignKey: 'department_id', as: 'department' });
+IndicatorCriterion.hasMany(Evaluation, { foreignKey: 'criterion_id', as: 'evaluations' });
+Evaluation.belongsTo(IndicatorCriterion, { foreignKey: 'criterion_id', as: 'criterion' });
+Evaluation.belongsTo(Submission, { foreignKey: 'submission_id', as: 'submission' });
+Evaluation.belongsTo(User, { foreignKey: 'evaluated_by', as: 'evaluator' });
 
 User.hasMany(Notification, { foreignKey: 'user_id', as: 'notifications' });
 Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Notification.belongsTo(Department, { foreignKey: 'department_id', as: 'department' });
+Notification.belongsTo(EvaluationPeriod, { foreignKey: 'period_id', as: 'period' });
 
-module.exports = { sequelize, User, College, Department, MetricCategory, Metric, ReportingPeriod, DataEntry, Notification };
+module.exports = {
+    sequelize,
+    User, College, Department, DepartmentUser,
+    Indicator, IndicatorCriterion,
+    EvaluationPeriod, PeriodIndicator,
+    Submission, SubmissionDocument,
+    Evaluation, Notification,
+};

@@ -18,7 +18,7 @@ router.post('/', authenticate, authorize('admin'), [
     body('email').isEmail().normalizeEmail(),
     body('password').isLength({ min: 8 }),
     body('full_name').notEmpty().trim(),
-    body('role').isIn(['admin', 'department_head', 'data_entry', 'viewer']),
+    body('role').isIn(['admin', 'qc_head', 'dept_rep', 'viewer']),
 ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });

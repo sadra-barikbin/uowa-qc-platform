@@ -9,10 +9,14 @@ const path = require('path');
 const cron = require('node-cron');
 
 const { sequelize } = require('./config/database');
+const { ensureViews, dropViews } = require('./utils/ensureViews');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const departmentRoutes = require('./routes/departments');
-const dataRoutes = require('./routes/data');
+const periodRoutes = require('./routes/periods');
+const indicatorRoutes = require('./routes/indicators');
+const submissionRoutes = require('./routes/submissions');
+const evaluationRoutes = require('./routes/evaluations');
 const reportRoutes = require('./routes/reports');
 const notificationRoutes = require('./routes/notifications');
 const dashboardRoutes = require('./routes/dashboard');
@@ -46,7 +50,10 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/auth',          authRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/departments',   departmentRoutes);
-app.use('/api/data',          dataRoutes);
+app.use('/api/periods',       periodRoutes);
+app.use('/api/indicators',    indicatorRoutes);
+app.use('/api/submissions',   submissionRoutes);
+app.use('/api/evaluations',   evaluationRoutes);
 app.use('/api/reports',       reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard',     dashboardRoutes);
@@ -76,8 +83,11 @@ async function start() {
     try {
         await sequelize.authenticate();
         console.log('✅  Database connected');
+        await dropViews(sequelize);
         await sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
         console.log('✅  Models synced');
+        await ensureViews(sequelize);
+        console.log('✅  Aggregation views ready');
         app.listen(PORT, () => console.log(`🚀  Server running on http://localhost:${PORT}`));
     } catch (err) {
         console.error('❌  Failed to start:', err);

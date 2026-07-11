@@ -1,180 +1,225 @@
-require('dotenv').config({ path: '../.env' });
+require('dotenv').config();
 const bcrypt = require('bcryptjs');
-const { sequelize, User, College, Department, MetricCategory, Metric, ReportingPeriod, DataEntry } = require('../models');
+const {
+    sequelize, User, College, Department, DepartmentUser,
+    Indicator, IndicatorCriterion, EvaluationPeriod, PeriodIndicator,
+    Submission, Evaluation,
+} = require('../models');
+const { ensureViews, dropViews } = require('./ensureViews');
+
+// Indicator + criteria definitions, reconstructed from the department's real monthly report
+const INDICATOR_DATA = [
+    { code: 'program-accreditation', name_ar: 'الاعتماد البرامجي', name_en: 'Program Accreditation', criteria: [
+        { code: 'workshops', name_ar: 'عقد ورش تثقيفية عن المتطلبات', type: 'checklist', weight: 1 },
+        { code: 'committees', name_ar: 'تشكيل لجان خاصة لمتطلبات الاعتماد البرامجي', type: 'checklist', weight: 1 },
+        { code: 'self-study-25', name_ar: 'اكمال 25% من تقرير التقييم الذاتي', type: 'checklist', weight: 1 },
+        { code: 'self-study-50', name_ar: 'اكمال 50% من تقرير التقييم الذاتي', type: 'checklist', weight: 1 },
+        { code: 'self-study-75', name_ar: 'اكمال 75% من تقرير التقييم الذاتي', type: 'checklist', weight: 1 },
+        { code: 'self-study-100', name_ar: 'اكمال 100% من تقرير التقييم الذاتي', type: 'checklist', weight: 1 },
+        { code: 'improvement-plan', name_ar: 'إعداد خطة التحسين', type: 'checklist', weight: 1 },
+    ]},
+    { code: 'labs-evaluation', name_ar: 'تقييم المختبرات', name_en: 'Labs Evaluation', criteria: [
+        { code: 'labs-score', name_ar: 'تقييم المختبرات', type: 'percentage', weight: 1 },
+    ]},
+    { code: 'program-description', name_ar: 'وصف البرنامج', name_en: 'Program Description', criteria: [
+        { code: 'program-desc', name_ar: 'دقة ومطابقة وصف البرنامج', type: 'checklist', weight: 1 },
+    ]},
+    { code: 'course-description', name_ar: 'وصف المقرر', name_en: 'Course Description', criteria: [
+        { code: 'courses-uploaded', name_ar: 'نسبة رفع وصف المقررات', type: 'ratio', weight: 1,
+          config: { numerator_label_ar: 'عدد المقررات المرفوع', denominator_label_ar: 'عدد المقررات المطلوب' } },
+    ]},
+    { code: 'curriculum-update', name_ar: 'المناهج والتحديث', name_en: 'Curriculum & Updates', criteria: [
+        { code: 'update-orders', name_ar: 'أوامر التحديث', type: 'checklist', weight: 0.5 },
+        { code: 'curriculum-comparison', name_ar: 'مقارنة المناهج', type: 'checklist', weight: 0.5 },
+    ]},
+    { code: 'community-service', name_ar: 'خدمة مجتمع', name_en: 'Community Service', criteria: [
+        { code: 'orders-minutes', name_ar: 'أوامر إدارية + محضر', type: 'checklist', weight: 0.5 },
+        { code: 'service-plan', name_ar: 'خطة خدمة المجتمع', type: 'checklist', weight: 0.5 },
+    ]},
+    { code: 'compliance-rules', name_ar: 'قواعد الامتثال', name_en: 'Compliance Rules', criteria: [
+        { code: 'student-faculty-ratio', name_ar: 'الامتثال لنسبة الطلبة إلى التدريسيين', type: 'ratio', weight: 1,
+          config: { numerator_label_ar: 'عدد التدريسيين المتاح', denominator_label_ar: 'عدد التدريسيين المطلوب' } },
+    ]},
+    { code: 'faculty-evaluation', name_ar: 'تقييم التدرسيين', name_en: 'Faculty Evaluation', criteria: [
+        { code: 'student-survey-avg', name_ar: 'متوسط تقييم الطلبة للتدريسيين', type: 'score_100', weight: 0.7 },
+        { code: 'head-evaluation', name_ar: 'تقييم رئيس القسم للتدريسيين', type: 'percentage', weight: 0.3 },
+    ]},
+    { code: 'student-survey', name_ar: 'استبانة تقييم الطلبة', name_en: 'Student Survey', criteria: [
+        { code: 'survey', name_ar: 'الاستبانة', type: 'checklist', weight: 0.5 },
+        { code: 'recommendations', name_ar: 'التوصيات', type: 'checklist', weight: 0.5 },
+    ]},
+    { code: 'labor-market', name_ar: 'متطلبات سوق العمل', name_en: 'Labor Market Requirements', criteria: [
+        { code: 'advisory-council', name_ar: 'المجلس الاستشاري', type: 'checklist', weight: 0.25 },
+        { code: 'meeting-minutes', name_ar: 'محضر اجتماع', type: 'checklist', weight: 0.25 },
+        { code: 'survey-analysis', name_ar: 'استمارة وتحليل سوق العمل', type: 'checklist', weight: 0.5 },
+    ]},
+    { code: 'institutional-accreditation', name_ar: 'الاعتماد المؤسسي', name_en: 'Institutional Accreditation', criteria: [
+        { code: 'self-eval-report', name_ar: 'تقرير التقييم الذاتي', type: 'checklist', weight: 0.5 },
+        { code: 'improvement-plan', name_ar: 'خطة التحسين المؤسسية', type: 'checklist', weight: 0.5 },
+    ]},
+    { code: 'student-representation', name_ar: 'ممثلية الطلبة', name_en: 'Student Representation', criteria: [
+        { code: 'admin-order', name_ar: 'أمر إداري', type: 'checklist', weight: 0.5 },
+        { code: 'meeting-minutes', name_ar: 'محضر اجتماع الطلبة', type: 'checklist', weight: 0.5 },
+    ]},
+    { code: 'learning-outcomes', name_ar: 'نتاجات التعلم', name_en: 'Learning Outcomes', criteria: [
+        { code: 'published-on-website', name_ar: 'معلن على الموقع', type: 'checklist', weight: 0.5 },
+        { code: 'meeting-minutes', name_ar: 'محضر اجتماع نتاجات التعلم', type: 'checklist', weight: 0.5 },
+    ]},
+];
+
+// real college / department structure, reconstructed from the department's report
+const COLLEGE_DATA = [
+    { code: 'ISL', name_ar: 'كلية العلوم الإسلامية', name_en: 'College of Islamic Sciences', depts: [
+        { code: 'ISL-GEN', name_ar: 'العلوم الاسلاميه', name_en: 'Islamic Sciences (General)' },
+        { code: 'QURAN', name_ar: 'علوم القران', name_en: 'Quran Sciences' },
+        { code: 'FIQH', name_ar: 'الفقه والأصول', name_en: 'Jurisprudence & Fundamentals' },
+    ]},
+    { code: 'ADM', name_ar: 'كلية الإدارة والاقتصاد', name_en: 'College of Administration & Economics', depts: [
+        { code: 'ADM-GEN', name_ar: 'ادارة واقتصاد', name_en: 'Administration & Economics (General)' },
+        { code: 'FIN', name_ar: 'علوم مالية ومصرفية', name_en: 'Financial & Banking Sciences' },
+        { code: 'BUS', name_ar: 'اداره اعمال', name_en: 'Business Administration' },
+        { code: 'ACC', name_ar: 'المحاسبه', name_en: 'Accounting' },
+        { code: 'HCM', name_ar: 'إدارة المؤسسات الصحية', name_en: 'Healthcare Management' },
+        { code: 'OGE', name_ar: 'اقتصاديات النفط والغاز', name_en: 'Oil & Gas Economics' },
+    ]},
+    { code: 'SCI', name_ar: 'كلية العلوم', name_en: 'College of Science', depts: [
+        { code: 'SCI-GEN', name_ar: 'العلوم', name_en: 'Science (General)' },
+        { code: 'FORN', name_ar: 'الأدلة الجنائية', name_en: 'Forensic Science' },
+        { code: 'MPHY', name_ar: 'الفيزياء الطبيه', name_en: 'Medical Physics' },
+        { code: 'IT', name_ar: 'تكنلوجيا المعلومات', name_en: 'Information Technology' },
+    ]},
+    { code: 'ENG', name_ar: 'كلية الهندسة', name_en: 'College of Engineering', depts: [
+        { code: 'CIVIL', name_ar: 'هندسة المدني', name_en: 'Civil Engineering' },
+        { code: 'HVAC', name_ar: 'هندسة التكييف والتبريد', name_en: 'HVAC Engineering' },
+        { code: 'BME', name_ar: 'هندسة الطب الحياتي', name_en: 'Biomedical Engineering' },
+        { code: 'PETRO', name_ar: 'هندسة النفط والغاز', name_en: 'Petroleum Engineering' },
+        { code: 'AERO', name_ar: 'هندسة الطائرات', name_en: 'Aerospace Engineering' },
+    ]},
+    { code: 'MED', name_ar: 'كلية الطب', name_en: 'College of Medicine', depts: [
+        { code: 'MED-GEN', name_ar: 'الطب', name_en: 'Medicine' },
+    ]},
+    { code: 'LAW', name_ar: 'كلية القانون', name_en: 'College of Law', depts: [
+        { code: 'LAW-GEN', name_ar: 'القانون', name_en: 'Law' },
+    ]},
+    { code: 'NRS', name_ar: 'كلية التمريض', name_en: 'College of Nursing', depts: [
+        { code: 'NRS-GEN', name_ar: 'التمريض', name_en: 'Nursing' },
+    ]},
+    { code: 'MDA', name_ar: 'كلية الاعلام', name_en: 'College of Media', depts: [
+        { code: 'MDA-GEN', name_ar: 'الاعلام', name_en: 'Media (General)' },
+        { code: 'DMDA', name_ar: 'الاعلام الرقمي', name_en: 'Digital Media' },
+        { code: 'ADMKT', name_ar: 'الإعلان والاتصال والتسويق', name_en: 'Advertising, Communication & Marketing' },
+    ]},
+    { code: 'MET', name_ar: 'كلية التقنيات الهندسة الحديثة', name_en: 'College of Modern Engineering Technologies', depts: [
+        { code: 'ELEC-TECH', name_ar: 'تقنيات الهندسة الكهربائية', name_en: 'Electrical Engineering Technologies' },
+        { code: 'RAD-TECH', name_ar: 'تقنيات الاشعة والطب النووي', name_en: 'Radiology & Nuclear Medicine Technologies' },
+        { code: 'DHEALTH-TECH', name_ar: 'تقنيات الصحة الرقمية الحديثة', name_en: 'Modern Digital Health Technologies' },
+        { code: 'ROBOT-TECH', name_ar: 'تقنيات الروبوتات والذكاء الاصطناعي', name_en: 'Robotics & AI Technologies' },
+    ]},
+    { code: 'CSIT', name_ar: 'كلية علوم الحاسوب وتكنلوجيا المعلومات', name_en: 'College of Computer Science & IT', depts: [
+        { code: 'AI', name_ar: 'الذكاء الاصطناعي', name_en: 'Artificial Intelligence' },
+        { code: 'CYBER', name_ar: 'الامن السيبراني', name_en: 'Cybersecurity' },
+    ]},
+    { code: 'DENT', name_ar: 'كلية طب الاسنان', name_en: 'College of Dentistry', depts: [
+        { code: 'DENT-GEN', name_ar: 'طب الاسنان', name_en: 'Dentistry' },
+    ]},
+    { code: 'PHARM', name_ar: 'كلية الصيدلة', name_en: 'College of Pharmacy', depts: [
+        { code: 'PHARM-GEN', name_ar: 'الصيدلة', name_en: 'Pharmacy' },
+    ]},
+];
+
+// indicators excluded from the monthly composite score by default (tracked, but informational —
+// matches the real report, where "قواعد الامتثال" doesn't feed into "تقييم شامل")
+const EXCLUDED_FROM_COMPOSITE = ['compliance-rules'];
 
 async function seed() {
+    await dropViews(sequelize);
     await sequelize.sync({ force: true });
     console.log('✅  Tables created');
+    await ensureViews(sequelize);
+    console.log('✅  Aggregation views created');
 
     // Users
-    const [admin, head1, entry1, viewer1] = await Promise.all([
-        User.create({ email: 'admin@university.edu', password: await bcrypt.hash('Admin@123', 12), full_name: 'System Administrator', full_name_ar: 'مدير النظام', role: 'admin' }),
-        User.create({ email: 'head.engineering@university.edu', password: await bcrypt.hash('Head@123', 12), full_name: 'Dr. Ahmed Al-Rashid', full_name_ar: 'د. أحمد الراشد', role: 'department_head' }),
-        User.create({ email: 'data.entry@university.edu', password: await bcrypt.hash('Data@123', 12), full_name: 'Sara Al-Mansouri', full_name_ar: 'سارة المنصوري', role: 'data_entry' }),
-        User.create({ email: 'viewer@university.edu', password: await bcrypt.hash('View@123', 12), full_name: 'Mohammed Al-Kaabi', full_name_ar: 'محمد الكعبي', role: 'viewer' }),
+    const [admin, qcHead, rep1, rep2, viewer1] = await Promise.all([
+        User.create({ email: 'admin@uowa.edu.iq', password: await bcrypt.hash('Admin@123', 12), full_name: 'QC Unit', full_name_ar: 'وحدة ضمان الجودة', role: 'admin' }),
+        User.create({ email: 'qc.head@uowa.edu.iq', password: await bcrypt.hash('Head@123', 12), full_name: 'Head of QC Department', full_name_ar: 'رئيس قسم ضمان الجودة', role: 'qc_head' }),
+        User.create({ email: 'rep.islamic@uowa.edu.iq', password: await bcrypt.hash('Rep@123', 12), full_name: 'Islamic Sciences Rep', full_name_ar: 'ممثل العلوم الاسلامية', role: 'dept_rep' }),
+        User.create({ email: 'rep.eng@uowa.edu.iq', password: await bcrypt.hash('Rep@123', 12), full_name: 'Engineering Rep', full_name_ar: 'ممثل الهندسة', role: 'dept_rep' }),
+        User.create({ email: 'viewer@uowa.edu.iq', password: await bcrypt.hash('View@123', 12), full_name: 'Viewer', full_name_ar: 'مشاهد', role: 'viewer' }),
     ]);
     console.log('✅  Users created');
 
-    // Colleges
-    const colleges = await Promise.all([
-        College.create({ name_en: 'College of Engineering', name_ar: 'كلية الهندسة', code: 'ENG', head_id: head1.id }),
-        College.create({ name_en: 'College of Science', name_ar: 'كلية العلوم', code: 'SCI' }),
-        College.create({ name_en: 'College of Administration & Economics', name_ar: 'كلية الإدارة والاقتصاد', code: 'ADM' }),
-        College.create({ name_en: 'College of Islamic Sciences', name_ar: 'كلية العلوم الإسلامية', code: 'ISL' }),
-        College.create({ name_en: 'College of Medicine', name_ar: 'كلية الطب', code: 'MED' }),
-        College.create({ name_en: 'College of Law', name_ar: 'كلية القانون', code: 'LAW' }),
-        College.create({ name_en: 'College of Media', name_ar: 'كلية الاعلام', code: 'MDA' }),
-        College.create({ name_en: 'College of Nursing', name_ar: 'كلية التمريض', code: 'NRS' }),
-    ]);
-    console.log('✅  Colleges created');
-
-    // Departments
-    const deptData = [
-        { eng: colleges[0], depts: [
-            { n_en:'Civil Engineering', n_ar:'هندسة المدني', code:'CIVIL' },
-            { n_en:'Petroleum Engineering', n_ar:'هندسة النفط والغاز', code:'PETRO' },
-            { n_en:'Aerospace Engineering', n_ar:'هندسة الطائرات', code:'AERO' },
-            { n_en:'Biomedical Engineering', n_ar:'هندسة الطب الحياتي', code:'BME' },
-            { n_en:'HVAC Engineering', n_ar:'هندسة التكييف والتبريد', code:'HVAC' },
-        ]},
-        { eng: colleges[1], depts: [
-            { n_en:'Physics', n_ar:'الفيزياء الطبية', code:'PHY' },
-            { n_en:'Forensic Science', n_ar:'الأدلة الجنائية', code:'FORN' },
-        ]},
-        { eng: colleges[2], depts: [
-            { n_en:'Business Administration', n_ar:'إدارة الأعمال', code:'BUS' },
-            { n_en:'Accounting', n_ar:'المحاسبة', code:'ACC' },
-            { n_en:'Economics', n_ar:'إدارة واقتصاد', code:'ECON' },
-            { n_en:'Financial Sciences', n_ar:'علوم مالية ومصرفية', code:'FIN' },
-        ]},
-        { eng: colleges[3], depts: [
-            { n_en:'Quran Sciences', n_ar:'علوم القران', code:'QRN' },
-            { n_en:'Jurisprudence', n_ar:'الفقه والأصول', code:'FQIH' },
-        ]},
-        { eng: colleges[4], depts: [{ n_en:'Medicine', n_ar:'الطب البشري', code:'MED_DEPT' }] },
-        { eng: colleges[5], depts: [{ n_en:'Law', n_ar:'القانون', code:'LAW_DEPT' }] },
-        { eng: colleges[6], depts: [{ n_en:'Digital Media', n_ar:'الاعلام الرقمي', code:'DIG_MDA' }] },
-        { eng: colleges[7], depts: [{ n_en:'Nursing', n_ar:'التمريض', code:'NRS_DEPT' }] },
-    ];
-
+    // Colleges & departments
     const departments = [];
-    for (const { eng, depts } of deptData) {
-        for (const d of depts) {
-            departments.push(await Department.create({ name_en: d.n_en, name_ar: d.n_ar, code: d.code, college_id: eng.id }));
+    let firstDept = null, engDept = null;
+    for (const c of COLLEGE_DATA) {
+        const college = await College.create({ name_en: c.name_en, name_ar: c.name_ar, code: c.code });
+        for (const d of c.depts) {
+            const dept = await Department.create({ name_en: d.name_en, name_ar: d.name_ar, code: d.code, college_id: college.id });
+            departments.push(dept);
+            if (c.code === 'ISL' && d.code === 'ISL-GEN') firstDept = dept;
+            if (c.code === 'ENG' && d.code === 'CIVIL') engDept = dept;
         }
     }
-    console.log(`✅  ${departments.length} departments created`);
+    console.log(`✅  ${COLLEGE_DATA.length} colleges, ${departments.length} departments created`);
 
-    // Metric Categories & Metrics
-    const catData = [
-        { n_en:'Program Accreditation', n_ar:'الاعتماد البرامجي', w:1.0, metrics:[
-            { n_en:'Awareness workshops held', n_ar:'ورش تثقيفية عن المتطلبات', w:0.14 },
-            { n_en:'Special committees formed', n_ar:'لجان خاصة لمتطلبات الاعتماد', w:0.14 },
-            { n_en:'25% self-study report', n_ar:'اكمال 25% تقرير التقييم', w:0.14 },
-            { n_en:'50% self-study report', n_ar:'اكمال 50% تقرير التقييم', w:0.14 },
-            { n_en:'75% self-study report', n_ar:'اكمال 75% تقرير التقييم', w:0.14 },
-            { n_en:'100% self-study report', n_ar:'اكمال 100% تقرير التقييم', w:0.14 },
-            { n_en:'Improvement plan prepared', n_ar:'إعداد خطة التحسين', w:0.14 },
-        ]},
-        { n_en:'Labs Evaluation', n_ar:'تقييم المختبرات', w:1.0, metrics:[
-            { n_en:'Lab equipment audit', n_ar:'مراجعة أجهزة المختبر', w:0.5 },
-            { n_en:'Lab safety compliance', n_ar:'امتثال السلامة المختبرية', w:0.5 },
-        ]},
-        { n_en:'Performance Evaluation', n_ar:'تقييم الأداء', w:1.0, metrics:[
-            { n_en:'KPI achievement rate', n_ar:'نسبة تحقيق مؤشرات الأداء', w:1.0 },
-        ]},
-        { n_en:'Program Description', n_ar:'وصف البرنامج', w:1.0, metrics:[
-            { n_en:'Program description accuracy', n_ar:'دقة وصف البرنامج', w:1.0 },
-        ]},
-        { n_en:'Curriculum & Updates', n_ar:'المناهج والتحديث', w:1.0, metrics:[
-            { n_en:'Curriculum update orders (50%)', n_ar:'أوامر التحديث', w:0.5 },
-            { n_en:'Curriculum comparison (50%)', n_ar:'مقارنة المناهج', w:0.5 },
-        ]},
-        { n_en:'Community Service', n_ar:'خدمة المجتمع', w:1.0, metrics:[
-            { n_en:'Administrative orders + minutes (50%)', n_ar:'أوامر إدارية + محضر', w:0.5 },
-            { n_en:'Community service plan (50%)', n_ar:'خطة خدمة المجتمع', w:0.5 },
-        ]},
-        { n_en:'Compliance Rules', n_ar:'قواعد الامتثال', w:1.0, metrics:[
-            { n_en:'Student-to-faculty ratio compliance', n_ar:'الامتثال لنسبة الطلبة إلى التدريسيين', w:1.0 },
-        ]},
-        { n_en:'Faculty Evaluation', n_ar:'تقييم التدريسيين', w:1.0, metrics:[
-            { n_en:'Faculty evaluation score', n_ar:'درجة تقييم التدريسيين', w:0.7, metric_type:'score', max_value:100 },
-            { n_en:'Dept head evaluation', n_ar:'تقييم من رئيس القسم', w:0.3 },
-        ]},
-        { n_en:'Labor Market Requirements', n_ar:'متطلبات سوق العمل', w:1.0, metrics:[
-            { n_en:'Advisory council (25%)', n_ar:'المجلس الاستشاري', w:0.25 },
-            { n_en:'Meeting minutes (25%)', n_ar:'محضر اجتماع', w:0.25 },
-            { n_en:'Survey + analysis (50%)', n_ar:'استمارة وتحليل سوق العمل', w:0.5 },
-        ]},
-        { n_en:'Student Survey', n_ar:'استبانة تقييم الطلبة', w:1.0, metrics:[
-            { n_en:'Survey completion (50%)', n_ar:'الاستبانة', w:0.5 },
-            { n_en:'Recommendations (50%)', n_ar:'التوصيات', w:0.5 },
-        ]},
-        { n_en:'Institutional Accreditation', n_ar:'الاعتماد المؤسسي', w:1.0, metrics:[
-            { n_en:'Self-evaluation report (50%)', n_ar:'تقرير التقييم الذاتي', w:0.5 },
-            { n_en:'Improvement plan (50%)', n_ar:'خطة التحسين المؤسسية', w:0.5 },
-        ]},
-        { n_en:'Student Representation', n_ar:'ممثلية الطلبة', w:1.0, metrics:[
-            { n_en:'Administrative order (50%)', n_ar:'أمر إداري', w:0.5 },
-            { n_en:'Meeting minutes (50%)', n_ar:'محضر اجتماع الطلبة', w:0.5 },
-        ]},
-        { n_en:'Learning Outcomes', n_ar:'نتاجات التعلم', w:1.0, metrics:[
-            { n_en:'Published on website (50%)', n_ar:'معلن على الموقع', w:0.5 },
-            { n_en:'Meeting minutes (50%)', n_ar:'محضر نتاجات التعلم', w:0.5 },
-        ]},
-    ];
+    await DepartmentUser.bulkCreate([
+        { department_id: firstDept.id, user_id: rep1.id, is_primary_contact: true },
+        { department_id: engDept.id, user_id: rep2.id, is_primary_contact: true },
+    ]);
 
-    const allMetrics = [];
-    for (let i = 0; i < catData.length; i++) {
-        const cd = catData[i];
-        const cat = await MetricCategory.create({ name_en: cd.n_en, name_ar: cd.n_ar, weight: cd.w, sort_order: i + 1 });
-        for (let j = 0; j < cd.metrics.length; j++) {
-            const md = cd.metrics[j];
-            allMetrics.push(await Metric.create({
-                category_id: cat.id, name_en: md.n_en, name_ar: md.n_ar,
-                weight: md.w || 1.0, metric_type: md.metric_type || 'percentage',
-                max_value: md.max_value || 1.0, sort_order: j + 1,
-            }));
+    // Indicators & criteria
+    const indicators = [];
+    const criteriaByIndicatorCode = {};
+    for (let i = 0; i < INDICATOR_DATA.length; i++) {
+        const ind = INDICATOR_DATA[i];
+        const indicator = await Indicator.create({
+            code: ind.code, name_en: ind.name_en, name_ar: ind.name_ar, sort_order: i, created_by: admin.id,
+        });
+        indicators.push(indicator);
+        const criteria = await IndicatorCriterion.bulkCreate(ind.criteria.map((c, j) => ({
+            indicator_id: indicator.id, code: c.code, name_en: c.name_ar, name_ar: c.name_ar,
+            criterion_type: c.type, weight: c.weight, config: c.config || {}, sort_order: j,
+        })), { returning: true });
+        criteriaByIndicatorCode[ind.code] = criteria;
+    }
+    console.log(`✅  ${indicators.length} indicators with criteria created`);
+
+    // Evaluation period
+    const period = await EvaluationPeriod.create({
+        year: 2026, month: 3, label_en: 'March 2026', label_ar: 'مارس 2026',
+        status: 'under_review', submission_deadline: new Date('2026-04-15'), created_by: admin.id,
+    });
+    await PeriodIndicator.bulkCreate(indicators.map((ind, i) => ({
+        period_id: period.id, indicator_id: ind.id, weight: 1.0, sort_order: i,
+        is_active: !EXCLUDED_FROM_COMPOSITE.includes(ind.code),
+    })));
+    console.log('✅  Evaluation period created');
+
+    // Sample submissions + evaluations for the two departments with assigned reps
+    for (const dept of [firstDept, engDept]) {
+        for (const ind of indicators) {
+            for (const criterion of criteriaByIndicatorCode[ind.code]) {
+                const submission = await Submission.create({
+                    period_id: period.id, department_id: dept.id, criterion_id: criterion.id,
+                    status: 'reviewed', submitted_by: dept.id === firstDept.id ? rep1.id : rep2.id, submitted_at: new Date(),
+                });
+                const score = 0.75 + Math.random() * 0.25;
+                await Evaluation.create({
+                    period_id: period.id, department_id: dept.id, criterion_id: criterion.id, submission_id: submission.id,
+                    score: Math.round(score * 100) / 100, evaluated_by: admin.id, evaluation_method: 'manual', evaluated_at: new Date(),
+                });
+            }
         }
     }
-    console.log(`✅  ${allMetrics.length} metrics created`);
+    console.log('✅  Sample submissions and evaluations created');
 
-    // Reporting Period
-    const period = await ReportingPeriod.create({ year: 2024, month: 3, label_en: 'March 2024', label_ar: 'مارس 2024', deadline: '2024-04-15' });
-    console.log('✅  Reporting period created');
-
-    // Sample data entries
-    const sampleScores = {
-        'CIVIL': [0.286,1,1,1,1,0.5,0.5,0.94,0.84,1,0.5,1,1,0],
-        'PETRO': [0.857,0.97,1,1,1,0.5,0.92,1,1,1,1,1,0],
-        'AERO':  [1,0.97,1,1,1,0.5,1,1,1,1,1,1,0],
-        'BUS':   [0.5,1,1,0.75,1,0.5,1,0.96,1,1,0,0.5,0],
-        'ACC':   [0.5,1,1,0.75,0.75,0.5,1,0.91,1,1,0,0.5,0],
-        'MED_DEPT':[1,1,1,1,1,0.5,1,0.97,1,1,0,0.5,0],
-        'LAW_DEPT':[0.93,0.89,1,1,1,0.5,1,1,1,1,1,1,0],
-        'NRS_DEPT':[0.714,0.98,1,1,1,0.5,1,1,1,1,1,1,0],
-    };
-
-    let entryCount = 0;
-    for (const dept of departments) {
-        const scores = sampleScores[dept.code];
-        if (!scores) continue;
-        for (let i = 0; i < Math.min(scores.length, allMetrics.length); i++) {
-            await DataEntry.create({
-                department_id: dept.id, metric_id: allMetrics[i].id, period_id: period.id,
-                value: scores[i], status: 'approved', submitted_by: entry1.id, approved_by: admin.id,
-                submitted_at: new Date(), approved_at: new Date(),
-            });
-            entryCount++;
-        }
-    }
-    console.log(`✅  ${entryCount} data entries created`);
     console.log('\n🎉  Seed complete!');
     console.log('\n📋  Login credentials:');
-    console.log('   Admin:        admin@university.edu / Admin@123');
-    console.log('   Dept Head:    head.engineering@university.edu / Head@123');
-    console.log('   Data Entry:   data.entry@university.edu / Data@123');
-    console.log('   Viewer:       viewer@university.edu / View@123');
+    console.log('   Admin (QC unit):  admin@uowa.edu.iq / Admin@123');
+    console.log('   QC Head:          qc.head@uowa.edu.iq / Head@123');
+    console.log('   Dept Rep:         rep.islamic@uowa.edu.iq / Rep@123');
+    console.log('   Dept Rep:         rep.eng@uowa.edu.iq / Rep@123');
+    console.log('   Viewer:           viewer@uowa.edu.iq / View@123');
     process.exit(0);
 }
 

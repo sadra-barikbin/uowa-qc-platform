@@ -95,10 +95,11 @@ npm start
 
 | الدور | البريد | كلمة المرور |
 |-------|--------|-------------|
-| مدير النظام | admin@university.edu | Admin@123 |
-| رئيس القسم | head.engineering@university.edu | Head@123 |
-| إدخال بيانات | data.entry@university.edu | Data@123 |
-| مشاهد | viewer@university.edu | View@123 |
+| وحدة ضمان الجودة (admin) | admin@uowa.edu.iq | Admin@123 |
+| رئيس قسم ضمان الجودة (qc_head) | qc.head@uowa.edu.iq | Head@123 |
+| ممثل قسم أكاديمي (dept_rep) | rep.islamic@uowa.edu.iq | Rep@123 |
+| ممثل قسم أكاديمي (dept_rep) | rep.eng@uowa.edu.iq | Rep@123 |
+| مشاهد (viewer) | viewer@uowa.edu.iq | View@123 |
 
 ---
 
@@ -116,10 +117,13 @@ university-platform/
 │   ├── routes/
 │   │   ├── auth.js              # Login, /me, change-password
 │   │   ├── users.js             # CRUD users (admin only)
-│   │   ├── departments.js       # CRUD departments & colleges
-│   │   ├── data.js              # Data entry, bulk save, Excel upload
-│   │   ├── dashboard.js         # KPIs, trends, category scores
-│   │   ├── reports.js           # Excel/PDF export, comparison
+│   │   ├── departments.js       # CRUD departments/colleges, rep assignment
+│   │   ├── periods.js           # Evaluation periods (open/close, clone indicators)
+│   │   ├── indicators.js        # CRUD indicators + their criteria
+│   │   ├── submissions.js       # Dept rep evidence upload per criterion
+│   │   ├── evaluations.js       # Reviewer/AI scoring per criterion, score rollups
+│   │   ├── dashboard.js         # KPIs, trends, indicator scores
+│   │   ├── reports.js           # Excel/PDF export (per-indicator + aggregation sheets), comparison
 │   │   └── notifications.js     # List, mark read, create
 │   ├── utils/
 │   │   ├── seedData.js          # Seed 35+ departments + sample data
@@ -169,24 +173,45 @@ university-platform/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/dashboard/summary?period_id=` | ملخص KPIs + جميع الأقسام |
-| GET | `/api/dashboard/trends` | اتجاه الأداء (آخر 6 أشهر) |
-| GET | `/api/dashboard/category-scores?period_id=` | متوسط كل محور |
+| GET | `/api/dashboard/trends` | اتجاه الأداء (آخر 6 فترات) |
+| GET | `/api/dashboard/indicator-scores?period_id=` | متوسط كل مؤشر |
+| GET | `/api/dashboard/pending-reviews?period_id=` | عدد المستندات بانتظار التقييم |
 
-### Data Entry
+### Evaluation Periods
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/data/metrics` | جميع المحاور والمؤشرات |
-| GET | `/api/data/periods` | الفترات الزمنية |
-| GET | `/api/data/entries?department_id=&period_id=` | استعلام البيانات |
-| POST | `/api/data/entries` | إدخال مؤشر واحد |
-| POST | `/api/data/entries/bulk` | إدخال جماعي |
-| PUT | `/api/data/entries/:id/approve` | اعتماد بيانات |
-| POST | `/api/data/upload` | رفع ملف Excel |
+| GET | `/api/periods` | كل الفترات |
+| POST | `/api/periods` | إنشاء فترة جديدة (مع نسخ مؤشرات فترة سابقة اختياريًا) |
+| PUT | `/api/periods/:id` | تعديل حالة/موعد الفترة |
+| PUT | `/api/periods/:id/indicators` | تحديد المؤشرات وأوزانها لهذه الفترة |
+
+### Indicators
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/indicators` | كل المؤشرات ومعاييرها |
+| POST | `/api/indicators` | إنشاء مؤشر جديد (مع معاييره) |
+| POST | `/api/indicators/:id/criteria` | إضافة معيار لمؤشر |
+
+### Submissions (ممثل القسم)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/submissions/matrix?period_id=&department_id=` | شبكة المعايير + المستندات المرفوعة |
+| POST | `/api/submissions` | إنشاء/تحديث رفع لمعيار معين |
+| POST | `/api/submissions/:id/documents` | رفع ملفات إثبات |
+| GET | `/api/submissions/documents/:docId/download` | تنزيل مستند |
+
+### Evaluations (لجنة الجودة)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/evaluations/matrix?period_id=&department_id=` | شبكة التقييم (مستندات + درجات) |
+| POST | `/api/evaluations` | تسجيل/تحديث درجة معيار |
+| GET | `/api/evaluations/scores/departments?period_id=` | الدرجة النهائية لكل قسم |
+| GET | `/api/evaluations/scores/colleges?period_id=` | الدرجة النهائية لكل كلية |
 
 ### Reports
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/reports/export/excel?period_id=` | تصدير Excel |
+| GET | `/api/reports/export/excel?period_id=` | تصدير Excel (ورقة لكل مؤشر + تقييم شامل + تقييم الكلية) |
 | GET | `/api/reports/export/pdf?period_id=` | تصدير PDF |
 | GET | `/api/reports/comparison?period1_id=&period2_id=` | مقارنة فترتين |
 
@@ -194,11 +219,12 @@ university-platform/
 
 ## الصلاحيات | Permissions
 
-| الإجراء | admin | department_head | data_entry | viewer |
-|---------|-------|----------------|------------|--------|
+| الإجراء | admin | qc_head | dept_rep | viewer |
+|---------|-------|---------|----------|--------|
 | عرض لوحة التحكم | ✅ | ✅ | ✅ | ✅ |
-| إدخال البيانات | ✅ | ✅ | ✅ | ❌ |
-| اعتماد البيانات | ✅ | ✅ | ❌ | ❌ |
+| رفع مستندات الإثبات | ✅ | ✅ | ✅ (لقسمه فقط) | ❌ |
+| تقييم المعايير | ✅ | ✅ | ❌ | ❌ |
+| إدارة المؤشرات والفترات | ✅ | ❌ | ❌ | ❌ |
 | إدارة الأقسام | ✅ | ❌ | ❌ | ❌ |
 | إدارة المستخدمين | ✅ | ❌ | ❌ | ❌ |
 | تصدير التقارير | ✅ | ✅ | ✅ | ✅ |
@@ -255,18 +281,12 @@ sudo certbot --nginx -d yourdomain.com
 
 ---
 
-## إضافة فترة زمنية جديدة | Add New Reporting Period
+## إضافة فترة تقييم جديدة | Add New Evaluation Period
 
 ```bash
-# عبر API (admin token مطلوب)
-curl -X POST http://localhost:5000/api/data/periods \
+# عبر API (admin token مطلوب) — ينسخ مؤشرات وأوزان فترة سابقة إن رغبت
+curl -X POST http://localhost:5000/api/periods \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"year":2024,"month":4,"label_ar":"أبريل 2024","label_en":"April 2024","deadline":"2024-05-15"}'
-```
-
-أو مباشرة من قاعدة البيانات:
-```sql
-INSERT INTO reporting_periods (year, month, label_ar, label_en, deadline)
-VALUES (2024, 4, 'أبريل 2024', 'April 2024', '2024-05-15');
+  -d '{"year":2026,"month":4,"label_ar":"أبريل 2026","label_en":"April 2026","submission_deadline":"2026-05-15","clone_from_period_id":"<previous-period-id>"}'
 ```

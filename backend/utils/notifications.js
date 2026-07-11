@@ -1,46 +1,68 @@
-const { Notification, User, Department, ReportingPeriod, DataEntry, Metric } = require('../models');
+const { Notification, User, Department, EvaluationPeriod, DepartmentUser, IndicatorCriterion, Submission } = require('../models');
 const { Op } = require('sequelize');
 
 async function sendDeadlineReminders() {
-    const openPeriods = await ReportingPeriod.findAll({ where: { is_open: true, deadline: { [Op.gte]: new Date() } } });
-    const users = await User.findAll({ where: { is_active: true, role: { [Op.in]: ['admin', 'department_head', 'data_entry'] } } });
+    const openPeriods = await EvaluationPeriod.findAll({
+        where: { status: 'open', submission_deadline: { [Op.gte]: new Date() } },
+    });
 
     for (const period of openPeriods) {
-        const daysLeft = Math.ceil((new Date(period.deadline) - new Date()) / (1000 * 60 * 60 * 24));
+        const daysLeft = Math.ceil((new Date(period.submission_deadline) - new Date()) / (1000 * 60 * 60 * 24));
         if (daysLeft > 7) continue;
 
-        for (const user of users) {
+        const reps = await User.findAll({
+            where: { is_active: true, role: 'dept_rep' },
+            include: [{ model: Department, as: 'departments', attributes: ['id'], through: { attributes: [] } }],
+        });
+
+        for (const user of reps) {
             const existing = await Notification.findOne({
-                where: { user_id: user.id, type: 'deadline', created_at: { [Op.gte]: new Date(Date.now() - 24*60*60*1000) } },
+                where: { user_id: user.id, type: 'deadline', period_id: period.id, created_at: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
             });
             if (existing) continue;
 
             await Notification.create({
-                user_id: user.id, type: 'deadline', priority: daysLeft <= 2 ? 'urgent' : 'high',
+                user_id: user.id, period_id: period.id, type: 'deadline', priority: daysLeft <= 2 ? 'urgent' : 'high',
                 title_en: `Deadline Reminder: ${period.label_en}`,
                 title_ar: `تذكير بالموعد النهائي: ${period.label_ar}`,
-                message_en: `${daysLeft} days remaining to submit data for ${period.label_en}`,
-                message_ar: `متبقي ${daysLeft} يوم لإدخال بيانات ${period.label_ar}`,
-                action_url: '/data-entry',
+                message_en: `${daysLeft} days remaining to submit evidence for ${period.label_en}`,
+                message_ar: `متبقي ${daysLeft} يوم لرفع مستندات ${period.label_ar}`,
+                action_url: '/submissions',
             });
         }
     }
 }
 
-async function notifyMissingData(department_id, period_id) {
-    const dept = await Department.findByPk(department_id);
-    const users = await User.findAll({ where: { role: { [Op.in]: ['admin', 'department_head'] } } });
+// notify QC staff that a department has unsubmitted criteria as the deadline nears
+async function notifyMissingSubmissions(period_id) {
+    const period = await EvaluationPeriod.findByPk(period_id);
+    if (!period) return;
 
-    for (const user of users) {
-        await Notification.create({
-            user_id: user.id, department_id, type: 'missing_data', priority: 'high',
-            title_en: `Missing data: ${dept.name_en}`,
-            title_ar: `بيانات مفقودة: ${dept.name_ar}`,
-            message_en: `Department ${dept.name_en} has not submitted all required data.`,
-            message_ar: `لم يقم قسم ${dept.name_ar} بإدخال جميع البيانات المطلوبة.`,
-            action_url: `/departments/${department_id}`,
-        });
+    const [departments, allCriteria, submissions, reviewers] = await Promise.all([
+        Department.findAll({ where: { is_active: true } }),
+        IndicatorCriterion.findAll({ where: { is_active: true } }),
+        Submission.findAll({ where: { period_id }, attributes: ['department_id', 'criterion_id'] }),
+        User.findAll({ where: { is_active: true, role: { [Op.in]: ['admin', 'qc_head'] } } }),
+    ]);
+
+    const submitted = new Set(submissions.map(s => `${s.department_id}__${s.criterion_id}`));
+    const criteriaCount = allCriteria.length;
+
+    for (const dept of departments) {
+        const missing = allCriteria.filter(c => !submitted.has(`${dept.id}__${c.id}`)).length;
+        if (missing === 0) continue;
+
+        for (const user of reviewers) {
+            await Notification.create({
+                user_id: user.id, department_id: dept.id, period_id, type: 'missing_submission', priority: 'high',
+                title_en: `Missing evidence: ${dept.name_en}`,
+                title_ar: `مستندات ناقصة: ${dept.name_ar}`,
+                message_en: `${dept.name_en} has not submitted ${missing}/${criteriaCount} criteria for ${period.label_en}.`,
+                message_ar: `لم يقم قسم ${dept.name_ar} برفع ${missing} من ${criteriaCount} معيار لفترة ${period.label_ar}.`,
+                action_url: `/departments/${dept.id}`,
+            });
+        }
     }
 }
 
-module.exports = { sendDeadlineReminders, notifyMissingData };
+module.exports = { sendDeadlineReminders, notifyMissingSubmissions };
