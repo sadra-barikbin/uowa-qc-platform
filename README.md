@@ -33,7 +33,7 @@ cp backend/.env.example backend/.env
 docker-compose up -d
 
 # 4. بذر البيانات التجريبية
-docker exec univ_backend node utils/seedData.js
+docker exec univ_backend node dist/utils/seedData.js
 
 # 5. افتح المتصفح
 # Frontend: http://localhost:3000
@@ -71,9 +71,15 @@ npm install
 # بذر البيانات التجريبية (المرة الأولى فقط)
 npm run seed
 
-# تشغيل الخادم
+# تشغيل الخادم (TypeScript، مع إعادة التشغيل التلقائي)
 npm run dev
 # سيعمل على: http://localhost:5000
+
+# فحص الأنواع (TypeScript)
+npm run typecheck
+
+# بناء نسخة الإنتاج (يُخرجها إلى dist/)
+npm run build && npm start
 ```
 
 #### الـ Frontend
@@ -107,32 +113,37 @@ npm start
 
 ```
 university-platform/
-├── backend/
+├── backend/                     # TypeScript (compiles to dist/, see tsconfig.json)
 │   ├── config/
-│   │   └── database.js          # Sequelize connection
+│   │   └── database.ts          # Sequelize connection
 │   ├── middleware/
-│   │   └── auth.js              # JWT auth + RBAC
+│   │   └── auth.ts              # JWT auth + RBAC
 │   ├── models/
-│   │   └── index.js             # All Sequelize models + associations
+│   │   └── index.ts             # All Sequelize models (class-based, typed) + associations
+│   ├── types/
+│   │   └── express.d.ts         # Augments Express Request with req.user
 │   ├── routes/
-│   │   ├── auth.js              # Login, /me, change-password
-│   │   ├── users.js             # CRUD users (admin only)
-│   │   ├── departments.js       # CRUD departments/colleges, rep assignment
-│   │   ├── periods.js           # Evaluation periods (open/close, clone indicators)
-│   │   ├── indicators.js        # CRUD indicators + their criteria
-│   │   ├── submissions.js       # Dept rep evidence upload per criterion
-│   │   ├── evaluations.js       # Reviewer/AI scoring per criterion, score rollups
-│   │   ├── dashboard.js         # KPIs, trends, indicator scores
-│   │   ├── reports.js           # Excel/PDF export (per-indicator + aggregation sheets), comparison
-│   │   └── notifications.js     # List, mark read, create
+│   │   ├── auth.ts              # Login, /me, change-password
+│   │   ├── users.ts             # CRUD users (admin only)
+│   │   ├── departments.ts       # CRUD departments/colleges, rep assignment
+│   │   ├── periods.ts           # Evaluation periods (open/close, clone indicators)
+│   │   ├── indicators.ts        # CRUD indicators + their criteria
+│   │   ├── submissions.ts       # Dept rep evidence upload per criterion
+│   │   ├── evaluations.ts       # Reviewer/AI scoring per criterion, score rollups
+│   │   ├── dashboard.ts         # KPIs, trends, indicator scores
+│   │   ├── reports.ts           # Excel/PDF export (per-indicator + aggregation sheets), comparison
+│   │   └── notifications.ts     # List, mark read, create
 │   ├── utils/
-│   │   ├── seedData.js          # Seed 35+ departments + sample data
-│   │   └── notifications.js     # Cron job helpers
+│   │   ├── seedData.ts          # Seed 35+ departments + sample data
+│   │   ├── notifications.ts     # Cron job helpers
+│   │   ├── ensureViews.ts       # Creates/drops the aggregation SQL views around sync()
+│   │   └── scores.ts            # Typed wrappers around the aggregation views
 │   ├── uploads/                 # Uploaded files (Excel, etc.)
-│   ├── server.js                # Express app entry point
+│   ├── server.ts                # Express app entry point
+│   ├── tsconfig.json
 │   ├── package.json
 │   ├── .env.example
-│   └── Dockerfile
+│   └── Dockerfile                # multi-stage: `npm run build` then run from dist/
 │
 ├── frontend/
 │   └── src/
@@ -268,7 +279,7 @@ sudo certbot --nginx -d yourdomain.com
 |-------|-----------|
 | Frontend | React 18 + React Router 6 |
 | Charts | Chart.js + react-chartjs-2 |
-| Backend | Node.js + Express 4 |
+| Backend | Node.js + TypeScript + Express 4 |
 | ORM | Sequelize 6 |
 | Database | PostgreSQL 15 |
 | Auth | JWT (jsonwebtoken) |

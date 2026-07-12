@@ -1,14 +1,16 @@
-const router = require('express').Router();
-const XLSX = require('xlsx');
-const PDFDocument = require('pdfkit');
-const {
+import { Router, Request, Response } from 'express';
+import XLSX from 'xlsx';
+import PDFDocument from 'pdfkit';
+import {
     Department, College, EvaluationPeriod, PeriodIndicator, Indicator,
     IndicatorCriterion, Evaluation,
-} = require('../models');
-const { authenticate } = require('../middleware/auth');
-const { getIndicatorScores, getDepartmentScores, getCollegeScores } = require('../utils/scores');
+} from '../models';
+import { authenticate } from '../middleware/auth';
+import { getIndicatorScores, getDepartmentScores, getCollegeScores } from '../utils/scores';
 
-async function loadReportData(period_id) {
+const router = Router();
+
+async function loadReportData(period_id: string) {
     const [period, departments, periodIndicators, evaluations, indicatorScores, departmentScores, collegeScores] = await Promise.all([
         EvaluationPeriod.findByPk(period_id),
         Department.findAll({ where: { is_active: true }, include: [{ model: College, as: 'college' }], order: [['name_ar', 'ASC']] }),
@@ -23,24 +25,26 @@ async function loadReportData(period_id) {
         getCollegeScores(period_id),
     ]);
 
-    const evalMap = {};
+    const evalMap: Record<string, Evaluation> = {};
     evaluations.forEach(e => { evalMap[`${e.department_id}__${e.criterion_id}`] = e; });
-    const indicatorScoreMap = {};
+    const indicatorScoreMap: Record<string, string | null> = {};
     indicatorScores.forEach(s => { indicatorScoreMap[`${s.department_id}__${s.indicator_id}`] = s.score; });
-    const departmentScoreMap = {};
+    const departmentScoreMap: Record<string, string | null> = {};
     departmentScores.forEach(s => { departmentScoreMap[s.department_id] = s.final_score; });
-    const collegeScoreMap = {};
+    const collegeScoreMap: Record<string, string | null> = {};
     collegeScores.forEach(s => { collegeScoreMap[s.college_id] = s.avg_score; });
 
     return { period, departments, periodIndicators, evalMap, indicatorScoreMap, departmentScoreMap, collegeScoreMap };
 }
 
-function num(v) { return v == null ? null : Math.round(Number(v) * 10000) / 10000; }
+function num(v: string | number | null | undefined): number | null {
+    return v == null ? null : Math.round(Number(v) * 10000) / 10000;
+}
 
 // GET /api/reports/export/excel?period_id= — one sheet per indicator + two aggregation sheets,
 // mirroring the department's original manual report layout
-router.get('/export/excel', authenticate, async (req, res) => {
-    const { period_id } = req.query;
+router.get('/export/excel', authenticate, async (req: Request, res: Response) => {
+    const { period_id } = req.query as Record<string, string | undefined>;
     if (!period_id) return res.status(400).json({ error: 'period_id required' });
 
     const { period, departments, periodIndicators, evalMap, indicatorScoreMap, departmentScoreMap, collegeScoreMap } = await loadReportData(period_id);
@@ -50,23 +54,23 @@ router.get('/export/excel', authenticate, async (req, res) => {
 
     // one sheet per indicator: rows = departments, columns = weighted criteria + completion
     periodIndicators.forEach(pi => {
-        const criteria = pi.indicator.criteria || [];
+        const criteria = pi.indicator!.criteria || [];
         const headers = ['الكلية/القسم', ...criteria.map(c => `${c.name_ar} (${Math.round(Number(c.weight) * 100)}%)`), 'الإنجاز'];
-        const rows = [headers];
+        const rows: (string | number | null)[][] = [headers];
         departments.forEach(dept => {
-            const values = criteria.map(c => num(evalMap[`${dept.id}__${c.id}`]?.score));
+            const values = criteria.map(c => num(evalMap[`${dept.id}__${c.id}`]?.score ?? null));
             const completion = num(indicatorScoreMap[`${dept.id}__${pi.indicator_id}`]);
             rows.push([dept.name_ar, ...values, completion]);
         });
         const ws = XLSX.utils.aoa_to_sheet(rows);
         ws['!cols'] = headers.map(() => ({ wch: 22 }));
-        const sheetName = pi.indicator.name_ar.slice(0, 31);
+        const sheetName = pi.indicator!.name_ar.slice(0, 31);
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
     });
 
     // "تقييم شامل" — per-department composite across all indicators
-    const deptHeaders = ['الكلية/القسم', ...periodIndicators.map(pi => pi.indicator.name_ar), 'التقييم النهائي'];
-    const deptRows = [deptHeaders];
+    const deptHeaders = ['الكلية/القسم', ...periodIndicators.map(pi => pi.indicator!.name_ar), 'التقييم النهائي'];
+    const deptRows: (string | number | null)[][] = [deptHeaders];
     departments.forEach(dept => {
         const values = periodIndicators.map(pi => num(indicatorScoreMap[`${dept.id}__${pi.indicator_id}`]));
         deptRows.push([dept.name_ar, ...values, num(departmentScoreMap[dept.id])]);
@@ -76,13 +80,13 @@ router.get('/export/excel', authenticate, async (req, res) => {
     XLSX.utils.book_append_sheet(wb, deptWs, 'تقييم شامل');
 
     // "التقييم الكلية" — per-college rollup
-    const colleges = [...new Map(departments.map(d => [d.college?.id, d.college]).filter(([id]) => id)).values()];
-    const collegeHeaders = ['الكلية', ...periodIndicators.map(pi => pi.indicator.name_ar), 'التقييم النهائي'];
-    const collegeRows = [collegeHeaders];
+    const colleges = [...new Map(departments.map(d => [d.college?.id, d.college]).filter((entry): entry is [string, College] => !!entry[0])).values()];
+    const collegeHeaders = ['الكلية', ...periodIndicators.map(pi => pi.indicator!.name_ar), 'التقييم النهائي'];
+    const collegeRows: (string | number | null)[][] = [collegeHeaders];
     colleges.forEach(college => {
         const collegeDepts = departments.filter(d => d.college_id === college.id);
         const values = periodIndicators.map(pi => {
-            const vals = collegeDepts.map(d => indicatorScoreMap[`${d.id}__${pi.indicator_id}`]).filter(v => v != null);
+            const vals = collegeDepts.map(d => indicatorScoreMap[`${d.id}__${pi.indicator_id}`]).filter((v): v is string => v != null);
             return vals.length ? num(vals.reduce((a, b) => a + Number(b), 0) / vals.length) : null;
         });
         collegeRows.push([college.name_ar, ...values, num(collegeScoreMap[college.id])]);
@@ -101,8 +105,9 @@ router.get('/export/excel', authenticate, async (req, res) => {
 });
 
 // GET /api/reports/export/pdf?period_id=
-router.get('/export/pdf', authenticate, async (req, res) => {
-    const { period_id } = req.query;
+router.get('/export/pdf', authenticate, async (req: Request, res: Response) => {
+    const { period_id } = req.query as Record<string, string | undefined>;
+    if (!period_id) return res.status(400).json({ error: 'period_id required' });
     const { period, departments, departmentScoreMap } = await loadReportData(period_id);
 
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
@@ -126,8 +131,8 @@ router.get('/export/pdf', authenticate, async (req, res) => {
 });
 
 // GET /api/reports/comparison?period1_id=&period2_id=
-router.get('/comparison', authenticate, async (req, res) => {
-    const { period1_id, period2_id } = req.query;
+router.get('/comparison', authenticate, async (req: Request, res: Response) => {
+    const { period1_id, period2_id } = req.query as Record<string, string | undefined>;
     if (!period1_id || !period2_id) return res.status(400).json({ error: 'Both period IDs required' });
 
     const [scores1, scores2, depts] = await Promise.all([
@@ -152,4 +157,4 @@ router.get('/comparison', authenticate, async (req, res) => {
     res.json({ comparison });
 });
 
-module.exports = router;
+export default router;

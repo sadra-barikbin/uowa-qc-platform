@@ -1,11 +1,13 @@
-const router = require('express').Router();
-const { Department, College, EvaluationPeriod, Indicator, Submission, Evaluation } = require('../models');
-const { authenticate } = require('../middleware/auth');
-const { getIndicatorScores, getDepartmentScores } = require('../utils/scores');
+import { Router, Request, Response } from 'express';
+import { Department, College, EvaluationPeriod, Indicator, Submission } from '../models';
+import { authenticate } from '../middleware/auth';
+import { getIndicatorScores, getDepartmentScores } from '../utils/scores';
+
+const router = Router();
 
 // GET /api/dashboard/summary?period_id=
-router.get('/summary', authenticate, async (req, res) => {
-    const { period_id } = req.query;
+router.get('/summary', authenticate, async (req: Request, res: Response) => {
+    const { period_id } = req.query as Record<string, string | undefined>;
 
     const period = period_id
         ? await EvaluationPeriod.findByPk(period_id)
@@ -14,7 +16,7 @@ router.get('/summary', authenticate, async (req, res) => {
     const departments = await Department.findAll({ where: { is_active: true }, include: [{ model: College, as: 'college' }] });
 
     const deptScores = period ? await getDepartmentScores(period.id) : [];
-    const scoreMap = {};
+    const scoreMap: Record<string, string | null> = {};
     deptScores.forEach(s => { scoreMap[s.department_id] = s.final_score; });
 
     const summaryDepts = departments.map(d => {
@@ -23,7 +25,7 @@ router.get('/summary', authenticate, async (req, res) => {
         return { id: d.id, name_ar: d.name_ar, name_en: d.name_en, college: d.college, score };
     });
 
-    const scored = summaryDepts.filter(d => d.score !== null);
+    const scored = summaryDepts.filter(d => d.score !== null) as Array<typeof summaryDepts[number] & { score: number }>;
     const avgScore = scored.length ? scored.reduce((a, b) => a + b.score, 0) / scored.length : 0;
     const excellent = scored.filter(d => d.score >= 90).length;
     const needsAttention = scored.filter(d => d.score < 50).length;
@@ -43,7 +45,7 @@ router.get('/summary', authenticate, async (req, res) => {
 });
 
 // GET /api/dashboard/trends — last 6 periods
-router.get('/trends', authenticate, async (req, res) => {
+router.get('/trends', authenticate, async (req: Request, res: Response) => {
     const periods = await EvaluationPeriod.findAll({ order: [['year', 'DESC'], ['month', 'DESC']], limit: 6 });
 
     const trends = await Promise.all(periods.map(async (p) => {
@@ -57,8 +59,8 @@ router.get('/trends', authenticate, async (req, res) => {
 });
 
 // GET /api/dashboard/indicator-scores?period_id= — average of each indicator across all departments
-router.get('/indicator-scores', authenticate, async (req, res) => {
-    const { period_id } = req.query;
+router.get('/indicator-scores', authenticate, async (req: Request, res: Response) => {
+    const { period_id } = req.query as Record<string, string | undefined>;
     if (!period_id) return res.json({ indicators: [] });
 
     const [indicators, scores] = await Promise.all([
@@ -66,7 +68,7 @@ router.get('/indicator-scores', authenticate, async (req, res) => {
         getIndicatorScores(period_id),
     ]);
 
-    const byIndicator = {};
+    const byIndicator: Record<string, number[]> = {};
     scores.forEach(s => {
         if (!byIndicator[s.indicator_id]) byIndicator[s.indicator_id] = [];
         if (s.score !== null) byIndicator[s.indicator_id].push(Number(s.score));
@@ -84,12 +86,12 @@ router.get('/indicator-scores', authenticate, async (req, res) => {
 });
 
 // GET /api/dashboard/pending-reviews?period_id= — submissions awaiting a reviewer score
-router.get('/pending-reviews', authenticate, async (req, res) => {
-    const { period_id } = req.query;
-    const where = { status: 'submitted' };
+router.get('/pending-reviews', authenticate, async (req: Request, res: Response) => {
+    const { period_id } = req.query as Record<string, string | undefined>;
+    const where: Record<string, string> = { status: 'submitted' };
     if (period_id) where.period_id = period_id;
     const count = await Submission.count({ where });
     res.json({ pending_reviews: count });
 });
 
-module.exports = router;
+export default router;

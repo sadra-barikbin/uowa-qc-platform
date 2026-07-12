@@ -1,7 +1,9 @@
+import { Sequelize } from 'sequelize';
+
 // `sequelize.sync({ alter: true })` (used in development on every boot) cannot ALTER a column
 // that one of our views depends on ("cannot alter type of a column used by a view or rule").
 // Call this before sync and ensureViews() after, so the views never block a schema alteration.
-async function dropViews(sequelize) {
+export async function dropViews(sequelize: Sequelize): Promise<void> {
     await sequelize.query('DROP VIEW IF EXISTS college_period_scores CASCADE;');
     await sequelize.query('DROP VIEW IF EXISTS department_period_scores CASCADE;');
     await sequelize.query('DROP VIEW IF EXISTS indicator_scores CASCADE;');
@@ -11,7 +13,7 @@ async function dropViews(sequelize) {
 // views (indicator_scores, department_period_scores, college_period_scores) defined in
 // database/schema.sql. Re-running this after every sync keeps them in place regardless of
 // whether the database was bootstrapped via `psql -f schema.sql` or via Sequelize sync.
-async function ensureViews(sequelize) {
+export async function ensureViews(sequelize: Sequelize): Promise<void> {
     await sequelize.query(`
         CREATE OR REPLACE VIEW indicator_scores AS
         SELECT
@@ -57,5 +59,3 @@ async function ensureViews(sequelize) {
         GROUP BY dps.period_id, d.college_id;
     `);
 }
-
-module.exports = { ensureViews, dropViews };

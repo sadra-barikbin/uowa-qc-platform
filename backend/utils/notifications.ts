@@ -1,13 +1,13 @@
-const { Notification, User, Department, EvaluationPeriod, DepartmentUser, IndicatorCriterion, Submission } = require('../models');
-const { Op } = require('sequelize');
+import { Op } from 'sequelize';
+import { Notification, User, Department, EvaluationPeriod, IndicatorCriterion, Submission } from '../models';
 
-async function sendDeadlineReminders() {
+export async function sendDeadlineReminders(): Promise<void> {
     const openPeriods = await EvaluationPeriod.findAll({
         where: { status: 'open', submission_deadline: { [Op.gte]: new Date() } },
     });
 
     for (const period of openPeriods) {
-        const daysLeft = Math.ceil((new Date(period.submission_deadline) - new Date()) / (1000 * 60 * 60 * 24));
+        const daysLeft = Math.ceil((new Date(period.submission_deadline!).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
         if (daysLeft > 7) continue;
 
         const reps = await User.findAll({
@@ -17,7 +17,7 @@ async function sendDeadlineReminders() {
 
         for (const user of reps) {
             const existing = await Notification.findOne({
-                where: { user_id: user.id, type: 'deadline', period_id: period.id, created_at: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+                where: { user_id: user.id, type: 'deadline', period_id: period.id, createdAt: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
             });
             if (existing) continue;
 
@@ -34,7 +34,7 @@ async function sendDeadlineReminders() {
 }
 
 // notify QC staff that a department has unsubmitted criteria as the deadline nears
-async function notifyMissingSubmissions(period_id) {
+export async function notifyMissingSubmissions(period_id: string): Promise<void> {
     const period = await EvaluationPeriod.findByPk(period_id);
     if (!period) return;
 
@@ -64,5 +64,3 @@ async function notifyMissingSubmissions(period_id) {
         }
     }
 }
-
-module.exports = { sendDeadlineReminders, notifyMissingSubmissions };

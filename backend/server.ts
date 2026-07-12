@@ -1,26 +1,26 @@
-require('dotenv').config();
-require('express-async-errors');
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-const cron = require('node-cron');
+import 'dotenv/config';
+import 'express-async-errors';
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
+import path from 'path';
+import cron from 'node-cron';
 
-const { sequelize } = require('./config/database');
-const { ensureViews, dropViews } = require('./utils/ensureViews');
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
-const departmentRoutes = require('./routes/departments');
-const periodRoutes = require('./routes/periods');
-const indicatorRoutes = require('./routes/indicators');
-const submissionRoutes = require('./routes/submissions');
-const evaluationRoutes = require('./routes/evaluations');
-const reportRoutes = require('./routes/reports');
-const notificationRoutes = require('./routes/notifications');
-const dashboardRoutes = require('./routes/dashboard');
-const { sendDeadlineReminders } = require('./utils/notifications');
+import { sequelize } from './config/database';
+import { ensureViews, dropViews } from './utils/ensureViews';
+import authRoutes from './routes/auth';
+import userRoutes from './routes/users';
+import departmentRoutes from './routes/departments';
+import periodRoutes from './routes/periods';
+import indicatorRoutes from './routes/indicators';
+import submissionRoutes from './routes/submissions';
+import evaluationRoutes from './routes/evaluations';
+import reportRoutes from './routes/reports';
+import notificationRoutes from './routes/notifications';
+import dashboardRoutes from './routes/dashboard';
+import { sendDeadlineReminders } from './utils/notifications';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,10 +59,10 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard',     dashboardRoutes);
 
 // ── Health check ──────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date() }));
 
 // ── Global error handler ──────────────────────────────────────
-app.use((err, req, res, next) => {
+app.use((err: Error & { status?: number }, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);
     const status = err.status || 500;
     res.status(status).json({

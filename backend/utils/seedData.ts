@@ -1,14 +1,29 @@
-require('dotenv').config();
-const bcrypt = require('bcryptjs');
-const {
+import 'dotenv/config';
+import bcrypt from 'bcryptjs';
+import {
     sequelize, User, College, Department, DepartmentUser,
     Indicator, IndicatorCriterion, EvaluationPeriod, PeriodIndicator,
-    Submission, Evaluation,
-} = require('../models');
-const { ensureViews, dropViews } = require('./ensureViews');
+    Submission, Evaluation, CriterionType,
+} from '../models';
+import { ensureViews, dropViews } from './ensureViews';
+
+interface CriterionSeed {
+    code: string;
+    name_ar: string;
+    type: CriterionType;
+    weight: number;
+    config?: Record<string, unknown>;
+}
+
+interface IndicatorSeed {
+    code: string;
+    name_ar: string;
+    name_en: string;
+    criteria: CriterionSeed[];
+}
 
 // Indicator + criteria definitions, reconstructed from the department's real monthly report
-const INDICATOR_DATA = [
+const INDICATOR_DATA: IndicatorSeed[] = [
     { code: 'program-accreditation', name_ar: 'الاعتماد البرامجي', name_en: 'Program Accreditation', criteria: [
         { code: 'workshops', name_ar: 'عقد ورش تثقيفية عن المتطلبات', type: 'checklist', weight: 1 },
         { code: 'committees', name_ar: 'تشكيل لجان خاصة لمتطلبات الاعتماد البرامجي', type: 'checklist', weight: 1 },
@@ -67,8 +82,11 @@ const INDICATOR_DATA = [
     ]},
 ];
 
+interface DepartmentSeed { code: string; name_ar: string; name_en: string; }
+interface CollegeSeed { code: string; name_ar: string; name_en: string; depts: DepartmentSeed[]; }
+
 // real college / department structure, reconstructed from the department's report
-const COLLEGE_DATA = [
+const COLLEGE_DATA: CollegeSeed[] = [
     { code: 'ISL', name_ar: 'كلية العلوم الإسلامية', name_en: 'College of Islamic Sciences', depts: [
         { code: 'ISL-GEN', name_ar: 'العلوم الاسلاميه', name_en: 'Islamic Sciences (General)' },
         { code: 'QURAN', name_ar: 'علوم القران', name_en: 'Quran Sciences' },
@@ -139,7 +157,7 @@ async function seed() {
     console.log('✅  Aggregation views created');
 
     // Users
-    const [admin, qcHead, rep1, rep2, viewer1] = await Promise.all([
+    const [admin, , rep1, rep2] = await Promise.all([
         User.create({ email: 'admin@uowa.edu.iq', password: await bcrypt.hash('Admin@123', 12), full_name: 'QC Unit', full_name_ar: 'وحدة ضمان الجودة', role: 'admin' }),
         User.create({ email: 'qc.head@uowa.edu.iq', password: await bcrypt.hash('Head@123', 12), full_name: 'Head of QC Department', full_name_ar: 'رئيس قسم ضمان الجودة', role: 'qc_head' }),
         User.create({ email: 'rep.islamic@uowa.edu.iq', password: await bcrypt.hash('Rep@123', 12), full_name: 'Islamic Sciences Rep', full_name_ar: 'ممثل العلوم الاسلامية', role: 'dept_rep' }),
@@ -149,8 +167,9 @@ async function seed() {
     console.log('✅  Users created');
 
     // Colleges & departments
-    const departments = [];
-    let firstDept = null, engDept = null;
+    const departments: Department[] = [];
+    let firstDept: Department | null = null;
+    let engDept: Department | null = null;
     for (const c of COLLEGE_DATA) {
         const college = await College.create({ name_en: c.name_en, name_ar: c.name_ar, code: c.code });
         for (const d of c.depts) {
@@ -160,6 +179,7 @@ async function seed() {
             if (c.code === 'ENG' && d.code === 'CIVIL') engDept = dept;
         }
     }
+    if (!firstDept || !engDept) throw new Error('Expected seed departments were not created');
     console.log(`✅  ${COLLEGE_DATA.length} colleges, ${departments.length} departments created`);
 
     await DepartmentUser.bulkCreate([
@@ -168,8 +188,8 @@ async function seed() {
     ]);
 
     // Indicators & criteria
-    const indicators = [];
-    const criteriaByIndicatorCode = {};
+    const indicators: Indicator[] = [];
+    const criteriaByIndicatorCode: Record<string, IndicatorCriterion[]> = {};
     for (let i = 0; i < INDICATOR_DATA.length; i++) {
         const ind = INDICATOR_DATA[i];
         const indicator = await Indicator.create({
