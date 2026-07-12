@@ -29,7 +29,7 @@
     --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
     --shadow:    0 2px 8px rgba(0,0,0,.10);
     --shadow-lg: 0 8px 24px rgba(0,0,0,.12);
-    --font: 'Segoe UI', 'Tahoma', system-ui, sans-serif;
+    --font: 'IBM Plex Sans Arabic', 'Segoe UI', 'Tahoma', system-ui, sans-serif;
     --transition: .18s ease;
 }
 
