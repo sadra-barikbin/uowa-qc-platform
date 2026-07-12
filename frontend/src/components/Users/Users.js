@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { usersAPI } from '../../utils/api';
 
-const ROLES = { admin: 'مدير النظام', department_head: 'رئيس القسم', data_entry: 'إدخال بيانات', viewer: 'مشاهد' };
-const ROLE_BADGE = { admin: 'badge-danger', department_head: 'badge-primary', data_entry: 'badge-warning', viewer: 'badge-gray' };
+const ROLES = { admin: 'وحدة ضمان الجودة', qc_head: 'رئيس القسم', dept_rep: 'ممثل قسم', viewer: 'مشاهد' };
+const ROLE_BADGE = { admin: 'badge-danger', qc_head: 'badge-primary', dept_rep: 'badge-warning', viewer: 'badge-gray' };
 
 export default function Users() {
     const [users, setUsers] = useState([]);

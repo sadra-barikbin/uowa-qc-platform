@@ -239,8 +239,10 @@ SELECT
     pi.period_id,
     d.id AS department_id,
     pi.indicator_id,
-    CASE WHEN SUM(ic.weight) > 0
-         THEN SUM(COALESCE(e.score, 0) * ic.weight) / SUM(ic.weight)
+    -- NULL until at least one of this indicator's criteria has actually been evaluated,
+    -- so "nobody has reviewed this yet" reads differently from "reviewed and scored 0"
+    CASE WHEN COUNT(e.score) = 0 THEN NULL
+         WHEN SUM(ic.weight) > 0 THEN SUM(COALESCE(e.score, 0) * ic.weight) / SUM(ic.weight)
          ELSE NULL END AS score,
     COUNT(ic.id) AS criteria_total,
     COUNT(e.score) AS criteria_scored
@@ -257,8 +259,9 @@ CREATE VIEW department_period_scores AS
 SELECT
     isr.period_id,
     isr.department_id,
-    CASE WHEN SUM(pi.weight) > 0
-         THEN SUM(COALESCE(isr.score, 0) * pi.weight) / SUM(pi.weight)
+    -- same rule one level up: NULL until at least one indicator has a score
+    CASE WHEN COUNT(isr.score) = 0 THEN NULL
+         WHEN SUM(pi.weight) > 0 THEN SUM(COALESCE(isr.score, 0) * pi.weight) / SUM(pi.weight)
          ELSE NULL END AS final_score
 FROM indicator_scores isr
 JOIN period_indicators pi ON pi.period_id = isr.period_id AND pi.indicator_id = isr.indicator_id

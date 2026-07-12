@@ -76,6 +76,14 @@ EvaluationPeriod --< PeriodIndicator >-- Indicator --< IndicatorCriterion >-- Su
 queries them via `sequelize.query`. If you add a new aggregation, prefer extending these views over computing
 rollups in JS — the dashboard, reports, and evaluations routes all read from the same three views.
 
+**`score`/`final_score` is `NULL` only when *nothing* has been evaluated yet** — the moment even one criterion
+has a score, the rest are treated as 0 in the weighted average (so a half-reviewed department shows a real,
+dragged-down percentage, not a missing one). This is deliberate — untouched vs. reviewed-and-failing need to look
+different in the UI (`لم يُقيَّم بعد` vs. `0%`) — and it's easy to regress: an earlier version of these views
+used `COALESCE(e.score, 0)` unconditionally, which made every unevaluated row read as a real 0% instead of
+"not yet reviewed" (caught via manual browser testing, not by any type or lint check). If you touch these
+`CASE` expressions, keep the `COUNT(e.score) = 0 THEN NULL` guard.
+
 **Non-obvious gotcha**: `sequelize.sync({ alter: true })` (used on every dev boot) fails if these views still
 exist, because Postgres won't let you `ALTER` a column that a view depends on. `server.ts` and `seedData.ts` both
 call `dropViews()` before `sync()` and `ensureViews()` after — if you add a new one-off script that calls
@@ -108,14 +116,22 @@ value. Don't re-enable them without expecting a lot of unrelated churn.
 `req.user` is typed via `backend/types/express.d.ts` (a global `Express.Request` augmentation), not per-route
 casting.
 
-### Known gap: frontend is stale
+### Frontend is wired to the current API
 
-`frontend/src/utils/api.js` still calls the pre-redesign endpoints (`/data/metrics`, `/data/entries`,
-`/data/upload`, etc.) that no longer exist on the backend — they were replaced by `/periods`, `/indicators`,
-`/submissions`, `/evaluations`. The frontend components (`DataEntry`, `Departments`, `Dashboard`, etc.) also
-assume the old flat metric-scoring model, not the indicator/criterion/submission/evaluation model. Treat the
-frontend as needing a matching rewrite, not as a working reference for how the current API should be consumed —
-consult the route files under `backend/routes/` and the README's API reference table instead.
+`frontend/src/utils/api.js` targets the current route set (`/periods`, `/indicators`, `/submissions`,
+`/evaluations`, etc.), not the old flat metric-scoring API. `Submissions.js` (dept rep evidence upload) and
+`Evaluations.js` (reviewer scoring) are the two pages that implement the actual per-criterion workflow — both
+drive off `GET /api/{submissions,evaluations}/matrix?period_id=&department_id=`, which returns one row per
+active criterion merged with its submission/evaluation state. `Evaluations.js` has to branch UI per
+`criterion_type` and get the payload shape right for each: `checklist`/`percentage` send `score` as an
+already-divided 0–1 fraction, `score_100` sends the raw 0–100 value (the backend divides it), and `ratio` sends
+`raw_values: {numerator, denominator}` with no `score` at all — get this wrong and `POST /api/evaluations`
+rejects it. `DepartmentDetail.js` links out to whichever of those two pages the signed-in role can use, with
+`?period=&department=` query params the target page pre-fills from.
+
+Two backend routes (`GET /api/submissions`, `GET /api/evaluations`, listing without a `department_id` filter)
+were gated with `authorize()` during the frontend sync, since they had no role check at all — a `dept_rep` or
+`viewer` could otherwise omit `department_id` and read every department's submissions/evaluations unscoped.
 
 ### Seed data reflects the real institution
 

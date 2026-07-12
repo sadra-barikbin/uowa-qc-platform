@@ -48,10 +48,10 @@ export default function Login() {
                     <p style={{ fontSize:11, fontWeight:600, color:'#6b7280', marginBottom:10, textAlign:'center' }}>حسابات تجريبية — اضغط للملء</p>
                     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
                         {[
-                            { label:'مدير النظام', email:'admin@university.edu', pass:'Admin@123', color:'#1a56db' },
-                            { label:'رئيس القسم', email:'head.engineering@university.edu', pass:'Head@123', color:'#0e9f6e' },
-                            { label:'إدخال بيانات', email:'data.entry@university.edu', pass:'Data@123', color:'#c27803' },
-                            { label:'مشاهد', email:'viewer@university.edu', pass:'View@123', color:'#6b7280' },
+                            { label:'وحدة الجودة', email:'admin@uowa.edu.iq', pass:'Admin@123', color:'#1a56db' },
+                            { label:'رئيس القسم', email:'qc.head@uowa.edu.iq', pass:'Head@123', color:'#0e9f6e' },
+                            { label:'ممثل قسم', email:'rep.islamic@uowa.edu.iq', pass:'Rep@123', color:'#c27803' },
+                            { label:'مشاهد', email:'viewer@uowa.edu.iq', pass:'View@123', color:'#6b7280' },
                         ].map(acc => (
                             <button key={acc.email} onClick={() => fill(acc.email, acc.pass)} style={{ padding:'7px 10px', borderRadius:8, border:`1px solid ${acc.color}30`, background:`${acc.color}10`, color:acc.color, fontSize:12, fontWeight:600, cursor:'pointer' }}>
                                 {acc.label}

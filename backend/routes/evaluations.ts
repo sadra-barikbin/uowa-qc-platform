@@ -17,7 +17,7 @@ function computeRatioScore(raw_values: { numerator?: number; denominator?: numbe
 const router = Router();
 
 // GET /api/evaluations?period_id=&department_id=
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, authorize('admin', 'qc_head'), async (req: Request, res: Response) => {
     const { period_id, department_id, criterion_id } = req.query as Record<string, string | undefined>;
     const where: Record<string, string> = {};
     if (period_id) where.period_id = period_id;
