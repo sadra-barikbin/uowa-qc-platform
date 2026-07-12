@@ -1,8 +1,15 @@
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
 FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
-COPY . .
+COPY --from=build /app/dist ./dist
 RUN mkdir -p uploads
 EXPOSE 5000
-CMD ["node", "server.js"]
+CMD ["node", "dist/server.js"]

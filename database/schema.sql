@@ -1,4 +1,4 @@
--- University Performance Tracking Platform
+-- University QC Platform
 -- PostgreSQL Schema
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -6,7 +6,11 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ============================================================
 -- USERS & AUTH
 -- ============================================================
-CREATE TYPE user_role AS ENUM ('admin', 'department_head', 'data_entry', 'viewer');
+-- admin    = QC unit staff running the monthly evaluation (full control)
+-- qc_head  = head of the QC department (oversight, read/approve everything)
+-- dept_rep = faculty department representative (uploads evidence for their own department only)
+-- viewer   = read-only access to published reports
+CREATE TYPE user_role AS ENUM ('admin', 'qc_head', 'dept_rep', 'viewer');
 
 CREATE TABLE users (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -23,124 +27,181 @@ CREATE TABLE users (
 );
 
 -- ============================================================
--- DEPARTMENTS
+-- COLLEGES & DEPARTMENTS
 -- ============================================================
 CREATE TABLE colleges (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name_en     VARCHAR(255) NOT NULL,
     name_ar     VARCHAR(255) NOT NULL,
     code        VARCHAR(50) UNIQUE NOT NULL,
-    head_id     UUID REFERENCES users(id),
     is_active   BOOLEAN DEFAULT TRUE,
     created_at  TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE departments (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    college_id  UUID REFERENCES colleges(id) ON DELETE CASCADE,
-    name_en     VARCHAR(255) NOT NULL,
-    name_ar     VARCHAR(255) NOT NULL,
-    code        VARCHAR(50) UNIQUE NOT NULL,
-    head_id     UUID REFERENCES users(id),
-    is_active   BOOLEAN DEFAULT TRUE,
-    created_at  TIMESTAMP DEFAULT NOW(),
-    updated_at  TIMESTAMP DEFAULT NOW()
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    college_id        UUID REFERENCES colleges(id) ON DELETE CASCADE,
+    name_en           VARCHAR(255) NOT NULL,
+    name_ar           VARCHAR(255) NOT NULL,
+    code              VARCHAR(50) UNIQUE NOT NULL,
+    -- reference link to the department's current shared-drive folder, kept during the
+    -- transition away from manual Drive-based submission
+    drive_folder_url  VARCHAR(1000),
+    is_active         BOOLEAN DEFAULT TRUE,
+    created_at        TIMESTAMP DEFAULT NOW(),
+    updated_at        TIMESTAMP DEFAULT NOW()
 );
 
+-- Faculty representatives (and other users) assigned to a department
 CREATE TABLE department_users (
-    department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
-    user_id       UUID REFERENCES users(id) ON DELETE CASCADE,
-    role          user_role NOT NULL DEFAULT 'viewer',
-    assigned_at   TIMESTAMP DEFAULT NOW(),
+    department_id   UUID REFERENCES departments(id) ON DELETE CASCADE,
+    user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
+    is_primary_contact BOOLEAN DEFAULT FALSE,
+    assigned_at     TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (department_id, user_id)
 );
 
 -- ============================================================
--- METRIC DEFINITIONS
+-- INDICATORS (dynamic, reusable definitions)
 -- ============================================================
-CREATE TABLE metric_categories (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name_en     VARCHAR(255) NOT NULL,
-    name_ar     VARCHAR(255) NOT NULL,
-    weight      DECIMAL(5,4) NOT NULL DEFAULT 1.0,
-    sort_order  INTEGER DEFAULT 0,
-    is_active   BOOLEAN DEFAULT TRUE
-);
-
-CREATE TABLE metrics (
+CREATE TABLE indicators (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    category_id     UUID REFERENCES metric_categories(id),
+    code            VARCHAR(50) UNIQUE NOT NULL,
     name_en         VARCHAR(255) NOT NULL,
     name_ar         VARCHAR(255) NOT NULL,
     description_en  TEXT,
     description_ar  TEXT,
-    metric_type     VARCHAR(50) DEFAULT 'percentage',  -- percentage | count | boolean | score
-    max_value       DECIMAL(10,2) DEFAULT 1.0,
-    weight          DECIMAL(5,4) DEFAULT 1.0,
-    deadline_day    INTEGER,  -- day of month for monthly deadline
-    is_required     BOOLEAN DEFAULT TRUE,
     sort_order      INTEGER DEFAULT 0,
     is_active       BOOLEAN DEFAULT TRUE,
-    created_at      TIMESTAMP DEFAULT NOW()
+    created_by      UUID REFERENCES users(id),
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW()
+);
+
+-- checklist = yes/no evidence item (score 0 or 1)
+-- percentage = reviewer enters a 0-100% completion directly
+-- ratio      = score derived from two raw numbers (e.g. submitted/required, capped at 1)
+-- score_100  = reviewer/AI enters a raw 0-100 score (e.g. average survey rating)
+CREATE TYPE criterion_type AS ENUM ('checklist', 'percentage', 'ratio', 'score_100');
+
+CREATE TABLE indicator_criteria (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    indicator_id      UUID REFERENCES indicators(id) ON DELETE CASCADE,
+    code              VARCHAR(50) NOT NULL,
+    name_en           VARCHAR(255) NOT NULL,
+    name_ar           VARCHAR(255) NOT NULL,
+    description_en    TEXT,
+    description_ar    TEXT,
+    criterion_type    criterion_type NOT NULL DEFAULT 'checklist',
+    weight            DECIMAL(5,4) NOT NULL DEFAULT 1.0,  -- relative weight within the indicator
+    -- e.g. for 'ratio' criteria: {"numerator_label_ar": "...", "denominator_label_ar": "..."}
+    config            JSONB DEFAULT '{}',
+    requires_evidence BOOLEAN DEFAULT TRUE,
+    sort_order        INTEGER DEFAULT 0,
+    is_active         BOOLEAN DEFAULT TRUE,
+    created_at        TIMESTAMP DEFAULT NOW(),
+    updated_at        TIMESTAMP DEFAULT NOW(),
+    UNIQUE(indicator_id, code)
 );
 
 -- ============================================================
--- DATA ENTRIES (monthly submissions)
+-- EVALUATION PERIODS (monthly cycles)
 -- ============================================================
-CREATE TABLE reporting_periods (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    year        INTEGER NOT NULL,
-    month       INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
-    label_en    VARCHAR(100),
-    label_ar    VARCHAR(100),
-    is_open     BOOLEAN DEFAULT TRUE,
-    deadline    DATE,
-    created_at  TIMESTAMP DEFAULT NOW(),
+CREATE TYPE period_status AS ENUM ('draft', 'open', 'under_review', 'published', 'closed');
+
+CREATE TABLE evaluation_periods (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    year                INTEGER NOT NULL,
+    month               INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+    label_en            VARCHAR(100),
+    label_ar            VARCHAR(100),
+    status              period_status NOT NULL DEFAULT 'draft',
+    submission_deadline TIMESTAMP,
+    created_by          UUID REFERENCES users(id),
+    created_at          TIMESTAMP DEFAULT NOW(),
+    updated_at          TIMESTAMP DEFAULT NOW(),
     UNIQUE(year, month)
 );
 
-CREATE TABLE data_entries (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    department_id   UUID REFERENCES departments(id) ON DELETE CASCADE,
-    metric_id       UUID REFERENCES metrics(id) ON DELETE CASCADE,
-    period_id       UUID REFERENCES reporting_periods(id),
-    value           DECIMAL(10,4),
-    notes           TEXT,
-    evidence_urls   JSONB DEFAULT '[]',
-    status          VARCHAR(50) DEFAULT 'draft',  -- draft | submitted | approved | rejected
-    submitted_by    UUID REFERENCES users(id),
-    approved_by     UUID REFERENCES users(id),
-    submitted_at    TIMESTAMP,
-    approved_at     TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    UNIQUE(department_id, metric_id, period_id)
+-- Which indicators apply to a given period, and their weight in that period's
+-- composite score (indicators are dynamic — the set/weights can change month to month)
+CREATE TABLE period_indicators (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    period_id     UUID REFERENCES evaluation_periods(id) ON DELETE CASCADE,
+    indicator_id  UUID REFERENCES indicators(id) ON DELETE CASCADE,
+    weight        DECIMAL(5,4) NOT NULL DEFAULT 1.0,  -- contribution to the department's final score
+    sort_order    INTEGER DEFAULT 0,
+    is_active     BOOLEAN DEFAULT TRUE,
+    UNIQUE(period_id, indicator_id)
 );
 
 -- ============================================================
--- FILE UPLOADS
+-- SUBMISSIONS (department evidence per criterion per period)
 -- ============================================================
-CREATE TABLE file_uploads (
+CREATE TYPE submission_status AS ENUM ('pending', 'submitted', 'needs_revision', 'reviewed');
+
+CREATE TABLE submissions (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    department_id UUID REFERENCES departments(id),
-    entry_id      UUID REFERENCES data_entries(id),
-    file_name     VARCHAR(500) NOT NULL,
-    file_path     VARCHAR(1000) NOT NULL,
-    file_size     INTEGER,
-    mime_type     VARCHAR(100),
-    uploaded_by   UUID REFERENCES users(id),
-    uploaded_at   TIMESTAMP DEFAULT NOW()
+    period_id     UUID REFERENCES evaluation_periods(id) ON DELETE CASCADE,
+    department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
+    criterion_id  UUID REFERENCES indicator_criteria(id) ON DELETE CASCADE,
+    status        submission_status NOT NULL DEFAULT 'pending',
+    notes         TEXT,
+    submitted_by  UUID REFERENCES users(id),
+    submitted_at  TIMESTAMP,
+    created_at    TIMESTAMP DEFAULT NOW(),
+    updated_at    TIMESTAMP DEFAULT NOW(),
+    UNIQUE(period_id, department_id, criterion_id)
+);
+
+CREATE TYPE storage_provider AS ENUM ('local', 'google_drive');
+
+CREATE TABLE submission_documents (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    submission_id     UUID REFERENCES submissions(id) ON DELETE CASCADE,
+    file_name         VARCHAR(500) NOT NULL,
+    storage_provider  storage_provider NOT NULL DEFAULT 'local',
+    storage_path      VARCHAR(1000) NOT NULL,  -- local path, or a Drive file id/url
+    mime_type         VARCHAR(100),
+    size_bytes        INTEGER,
+    uploaded_by       UUID REFERENCES users(id),
+    uploaded_at       TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================================
+-- EVALUATIONS (reviewer or AI score per department per criterion per period)
+-- ============================================================
+CREATE TYPE evaluation_method AS ENUM ('manual', 'ai');
+
+CREATE TABLE evaluations (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    period_id         UUID REFERENCES evaluation_periods(id) ON DELETE CASCADE,
+    department_id     UUID REFERENCES departments(id) ON DELETE CASCADE,
+    criterion_id      UUID REFERENCES indicator_criteria(id) ON DELETE CASCADE,
+    submission_id     UUID REFERENCES submissions(id),  -- evidence this score was based on, if any
+    score             DECIMAL(5,4) CHECK (score BETWEEN 0 AND 1),  -- NULL = not yet evaluated
+    raw_values        JSONB DEFAULT '{}',  -- e.g. {"numerator": 8, "denominator": 12} for ratio criteria
+    reviewer_notes    TEXT,
+    evaluated_by      UUID REFERENCES users(id),  -- NULL when evaluation_method = 'ai'
+    evaluation_method evaluation_method NOT NULL DEFAULT 'manual',
+    ai_confidence     DECIMAL(5,4),
+    ai_rationale      TEXT,
+    evaluated_at      TIMESTAMP,
+    created_at        TIMESTAMP DEFAULT NOW(),
+    updated_at        TIMESTAMP DEFAULT NOW(),
+    UNIQUE(period_id, department_id, criterion_id)
 );
 
 -- ============================================================
 -- NOTIFICATIONS
 -- ============================================================
-CREATE TYPE notification_type AS ENUM ('missing_data', 'deadline', 'approval', 'system', 'reminder');
+CREATE TYPE notification_type AS ENUM ('missing_submission', 'deadline', 'review_needed', 'system', 'reminder');
 
 CREATE TABLE notifications (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
     department_id   UUID REFERENCES departments(id),
+    period_id       UUID REFERENCES evaluation_periods(id),
     type            notification_type NOT NULL,
     title_en        VARCHAR(500) NOT NULL,
     title_ar        VARCHAR(500),
@@ -168,49 +229,61 @@ CREATE TABLE audit_log (
 );
 
 -- ============================================================
--- VIEWS
+-- AGGREGATION VIEWS
+-- mirror the "تقييم شامل" (per-department) and "التقييم الكلية" (per-college) report sheets
 -- ============================================================
-CREATE VIEW department_scores AS
+
+-- weighted score of each indicator, per department, per period
+CREATE VIEW indicator_scores AS
 SELECT
+    pi.period_id,
     d.id AS department_id,
-    d.name_ar AS department_name,
-    c.name_ar AS college_name,
-    rp.year,
-    rp.month,
-    COUNT(de.id) AS entries_count,
-    AVG(de.value / m.max_value) AS avg_score,
-    SUM(CASE WHEN de.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
-    SUM(CASE WHEN de.value IS NULL THEN 1 ELSE 0 END) AS missing_count
-FROM departments d
-JOIN colleges c ON d.college_id = c.id
-LEFT JOIN data_entries de ON de.department_id = d.id
-LEFT JOIN metrics m ON de.metric_id = m.id
-LEFT JOIN reporting_periods rp ON de.period_id = rp.id
-GROUP BY d.id, d.name_ar, c.name_ar, rp.year, rp.month;
+    pi.indicator_id,
+    CASE WHEN SUM(ic.weight) > 0
+         THEN SUM(COALESCE(e.score, 0) * ic.weight) / SUM(ic.weight)
+         ELSE NULL END AS score,
+    COUNT(ic.id) AS criteria_total,
+    COUNT(e.score) AS criteria_scored
+FROM period_indicators pi
+JOIN indicator_criteria ic ON ic.indicator_id = pi.indicator_id AND ic.is_active = TRUE
+CROSS JOIN departments d
+LEFT JOIN evaluations e
+    ON e.criterion_id = ic.id AND e.period_id = pi.period_id AND e.department_id = d.id
+WHERE pi.is_active = TRUE AND d.is_active = TRUE
+GROUP BY pi.period_id, d.id, pi.indicator_id;
+
+-- final weighted score per department per period ("تقييم شامل")
+CREATE VIEW department_period_scores AS
+SELECT
+    isr.period_id,
+    isr.department_id,
+    CASE WHEN SUM(pi.weight) > 0
+         THEN SUM(COALESCE(isr.score, 0) * pi.weight) / SUM(pi.weight)
+         ELSE NULL END AS final_score
+FROM indicator_scores isr
+JOIN period_indicators pi ON pi.period_id = isr.period_id AND pi.indicator_id = isr.indicator_id
+GROUP BY isr.period_id, isr.department_id;
+
+-- college rollup = average of its departments' final scores ("التقييم الكلية")
+CREATE VIEW college_period_scores AS
+SELECT
+    dps.period_id,
+    d.college_id,
+    AVG(dps.final_score) AS avg_score
+FROM department_period_scores dps
+JOIN departments d ON d.id = dps.department_id
+WHERE d.is_active = TRUE
+GROUP BY dps.period_id, d.college_id;
 
 -- ============================================================
 -- INDEXES
 -- ============================================================
-CREATE INDEX idx_data_entries_dept_period ON data_entries(department_id, period_id);
+CREATE INDEX idx_departments_college ON departments(college_id);
+CREATE INDEX idx_indicator_criteria_indicator ON indicator_criteria(indicator_id);
+CREATE INDEX idx_period_indicators_period ON period_indicators(period_id);
+CREATE INDEX idx_submissions_period_dept ON submissions(period_id, department_id);
+CREATE INDEX idx_submission_documents_submission ON submission_documents(submission_id);
+CREATE INDEX idx_evaluations_period_dept ON evaluations(period_id, department_id);
+CREATE INDEX idx_evaluations_criterion ON evaluations(criterion_id);
 CREATE INDEX idx_notifications_user ON notifications(user_id, is_read);
 CREATE INDEX idx_audit_log_user ON audit_log(user_id, created_at);
-CREATE INDEX idx_data_entries_status ON data_entries(status);
-
--- ============================================================
--- SEED DATA
--- ============================================================
-INSERT INTO metric_categories (id, name_en, name_ar, weight, sort_order) VALUES
-    ('a1b2c3d4-0001-0001-0001-000000000001', 'Program Accreditation',     'الاعتماد البرامجي',     1.0, 1),
-    ('a1b2c3d4-0001-0001-0001-000000000002', 'Labs Evaluation',            'تقييم المختبرات',       1.0, 2),
-    ('a1b2c3d4-0001-0001-0001-000000000003', 'Performance Evaluation',     'تقييم الأداء',          1.0, 3),
-    ('a1b2c3d4-0001-0001-0001-000000000004', 'Program Description',        'وصف البرنامج',          1.0, 4),
-    ('a1b2c3d4-0001-0001-0001-000000000005', 'Course Description',         'وصف المقررات',          1.0, 5),
-    ('a1b2c3d4-0001-0001-0001-000000000006', 'Curriculum & Updates',       'المناهج والتحديث',      1.0, 6),
-    ('a1b2c3d4-0001-0001-0001-000000000007', 'Community Service',          'خدمة المجتمع',          1.0, 7),
-    ('a1b2c3d4-0001-0001-0001-000000000008', 'Compliance Rules',           'قواعد الامتثال',        1.0, 8),
-    ('a1b2c3d4-0001-0001-0001-000000000009', 'Faculty Evaluation',         'تقييم التدريسيين',      1.0, 9),
-    ('a1b2c3d4-0001-0001-0001-000000000010', 'Labor Market Requirements',  'متطلبات سوق العمل',     1.0, 10),
-    ('a1b2c3d4-0001-0001-0001-000000000011', 'Student Survey',             'استبانة تقييم الطلبة',  1.0, 11),
-    ('a1b2c3d4-0001-0001-0001-000000000012', 'Institutional Accreditation','الاعتماد المؤسسي',      1.0, 12),
-    ('a1b2c3d4-0001-0001-0001-000000000013', 'Student Representation',     'ممثلية الطلبة',         1.0, 13),
-    ('a1b2c3d4-0001-0001-0001-000000000014', 'Learning Outcomes',          'نتاجات التعلم',         1.0, 14);

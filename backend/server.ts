@@ -1,22 +1,26 @@
-require('dotenv').config();
-require('express-async-errors');
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-const cron = require('node-cron');
+import 'dotenv/config';
+import 'express-async-errors';
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
+import path from 'path';
+import cron from 'node-cron';
 
-const { sequelize } = require('./config/database');
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
-const departmentRoutes = require('./routes/departments');
-const dataRoutes = require('./routes/data');
-const reportRoutes = require('./routes/reports');
-const notificationRoutes = require('./routes/notifications');
-const dashboardRoutes = require('./routes/dashboard');
-const { sendDeadlineReminders } = require('./utils/notifications');
+import { sequelize } from './config/database';
+import { ensureViews, dropViews } from './utils/ensureViews';
+import authRoutes from './routes/auth';
+import userRoutes from './routes/users';
+import departmentRoutes from './routes/departments';
+import periodRoutes from './routes/periods';
+import indicatorRoutes from './routes/indicators';
+import submissionRoutes from './routes/submissions';
+import evaluationRoutes from './routes/evaluations';
+import reportRoutes from './routes/reports';
+import notificationRoutes from './routes/notifications';
+import dashboardRoutes from './routes/dashboard';
+import { sendDeadlineReminders } from './utils/notifications';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -46,16 +50,19 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/auth',          authRoutes);
 app.use('/api/users',         userRoutes);
 app.use('/api/departments',   departmentRoutes);
-app.use('/api/data',          dataRoutes);
+app.use('/api/periods',       periodRoutes);
+app.use('/api/indicators',    indicatorRoutes);
+app.use('/api/submissions',   submissionRoutes);
+app.use('/api/evaluations',   evaluationRoutes);
 app.use('/api/reports',       reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard',     dashboardRoutes);
 
 // ── Health check ──────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date() }));
 
 // ── Global error handler ──────────────────────────────────────
-app.use((err, req, res, next) => {
+app.use((err: Error & { status?: number }, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);
     const status = err.status || 500;
     res.status(status).json({
@@ -76,8 +83,11 @@ async function start() {
     try {
         await sequelize.authenticate();
         console.log('✅  Database connected');
+        await dropViews(sequelize);
         await sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
         console.log('✅  Models synced');
+        await ensureViews(sequelize);
+        console.log('✅  Aggregation views ready');
         app.listen(PORT, () => console.log(`🚀  Server running on http://localhost:${PORT}`));
     } catch (err) {
         console.error('❌  Failed to start:', err);
