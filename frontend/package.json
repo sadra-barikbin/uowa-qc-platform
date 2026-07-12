@@ -3,23 +3,31 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.22.3",
-    "react-scripts": "5.0.1",
+    "@fontsource/ibm-plex-sans-arabic": "^5.2.9",
     "axios": "^1.6.7",
     "chart.js": "^4.4.2",
+    "date-fns": "^3.3.1",
+    "react": "^18.2.0",
     "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
-    "date-fns": "^3.3.1"
+    "react-router-dom": "^6.22.3",
+    "react-scripts": "5.0.1"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build"
   },
   "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version"
+    ]
   },
   "proxy": "http://localhost:5000"
 }
