@@ -13,11 +13,15 @@ export default function Departments() {
     const [search, setSearch] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [editDept, setEditDept] = useState(null);
-    const [form, setForm] = useState({ name_ar: '', name_en: '', code: '', college_id: '', head_id: '' });
+    const [form, setForm] = useState({ name_ar: '', name_en: '', code: '', college_id: '', drive_folder_url: '' });
     const [saving, setSaving] = useState(false);
+    const [repsDept, setRepsDept] = useState(null);
+    const [newRep, setNewRep] = useState('');
+
+    const loadDepartments = () => departmentsAPI.list().then(r => setDepartments(r.data.departments || [])).catch(() => {});
 
     useEffect(() => {
-        departmentsAPI.list().then(r => setDepartments(r.data.departments || [])).catch(() => {});
+        loadDepartments();
         departmentsAPI.colleges().then(r => setColleges(r.data.colleges || [])).catch(() => {});
         if (can('admin')) usersAPI.list().then(r => setUsers(r.data.users || [])).catch(() => {});
     }, []);
@@ -26,8 +30,8 @@ export default function Departments() {
         d.name_ar?.includes(search) || d.name_en?.toLowerCase().includes(search.toLowerCase()) || d.code?.includes(search)
     );
 
-    const openAdd = () => { setEditDept(null); setForm({ name_ar: '', name_en: '', code: '', college_id: '', head_id: '' }); setShowModal(true); };
-    const openEdit = (d, e) => { e.stopPropagation(); setEditDept(d); setForm({ name_ar: d.name_ar, name_en: d.name_en, code: d.code, college_id: d.college_id || '', head_id: d.head_id || '' }); setShowModal(true); };
+    const openAdd = () => { setEditDept(null); setForm({ name_ar: '', name_en: '', code: '', college_id: '', drive_folder_url: '' }); setShowModal(true); };
+    const openEdit = (d, e) => { e.stopPropagation(); setEditDept(d); setForm({ name_ar: d.name_ar, name_en: d.name_en, code: d.code, college_id: d.college_id || '', drive_folder_url: d.drive_folder_url || '' }); setShowModal(true); };
 
     const save = async () => {
         if (!form.name_ar || !form.code) { toast.error('الاسم بالعربية والرمز مطلوبان'); return; }
@@ -35,8 +39,7 @@ export default function Departments() {
         try {
             if (editDept) { await departmentsAPI.update(editDept.id, form); toast.success('تم التحديث'); }
             else { await departmentsAPI.create(form); toast.success('تمت الإضافة'); }
-            const r = await departmentsAPI.list();
-            setDepartments(r.data.departments || []);
+            await loadDepartments();
             setShowModal(false);
         } catch (err) { toast.error(err.response?.data?.error || 'خطأ'); }
         finally { setSaving(false); }
@@ -49,12 +52,38 @@ export default function Departments() {
         catch { toast.error('خطأ في الحذف'); }
     };
 
+    const openReps = (d, e) => { e.stopPropagation(); setRepsDept(d); setNewRep(''); };
+
+    const addRep = async () => {
+        if (!newRep) return;
+        try {
+            await departmentsAPI.addRepresentative(repsDept.id, { user_id: newRep });
+            const r = await departmentsAPI.list();
+            setDepartments(r.data.departments || []);
+            setRepsDept(r.data.departments.find(d => d.id === repsDept.id));
+            setNewRep('');
+            toast.success('تمت إضافة الممثل');
+        } catch (err) { toast.error(err.response?.data?.error || 'خطأ'); }
+    };
+
+    const removeRep = async (userId) => {
+        try {
+            await departmentsAPI.removeRepresentative(repsDept.id, userId);
+            const r = await departmentsAPI.list();
+            setDepartments(r.data.departments || []);
+            setRepsDept(r.data.departments.find(d => d.id === repsDept.id));
+            toast.success('تمت إزالة الممثل');
+        } catch { toast.error('خطأ'); }
+    };
+
     const byCollege = {};
     filtered.forEach(d => {
         const key = d.college?.name_ar || 'غير محدد';
         if (!byCollege[key]) byCollege[key] = [];
         byCollege[key].push(d);
     });
+
+    const availableReps = users.filter(u => u.role === 'dept_rep' && !repsDept?.representatives?.some(r => r.id === u.id));
 
     return (
         <div>
@@ -78,15 +107,16 @@ export default function Departments() {
                                     <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--gray-900)' }}>{d.name_ar}</div>
                                     {can('admin') && (
                                         <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                                            <button className="btn btn-ghost btn-sm" onClick={e => openReps(d, e)} style={{ padding: '3px 8px' }}>الممثلون</button>
                                             <button className="btn btn-ghost btn-sm" onClick={e => openEdit(d, e)} style={{ padding: '3px 8px' }}>تعديل</button>
                                             <button className="btn btn-ghost btn-sm" onClick={e => deleteDept(d.id, e)} style={{ padding: '3px 8px', color: 'var(--danger)' }}>حذف</button>
                                         </div>
                                     )}
                                 </div>
                                 <div style={{ fontSize: 12, color: 'var(--gray-500)', marginBottom: 6 }}>{d.name_en}</div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
                                     <span style={{ fontSize: 11, background: 'var(--primary-light)', color: 'var(--primary)', padding: '2px 8px', borderRadius: 8, fontWeight: 600 }}>{d.code}</span>
-                                    {d.head && <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>رئيس: {d.head.full_name_ar || d.head.full_name}</span>}
+                                    {d.representatives?.length > 0 && <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>{d.representatives.length} ممثل</span>}
                                 </div>
                             </div>
                         ))}
@@ -124,18 +154,47 @@ export default function Departments() {
                                         {colleges.map(c => <option key={c.id} value={c.id}>{c.name_ar}</option>)}
                                     </select>
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">رئيس القسم</label>
-                                    <select className="form-select" value={form.head_id} onChange={e => setForm(f => ({ ...f, head_id: e.target.value }))}>
-                                        <option value="">اختر رئيساً...</option>
-                                        {users.filter(u => ['admin','department_head'].includes(u.role)).map(u => <option key={u.id} value={u.id}>{u.full_name_ar || u.full_name}</option>)}
-                                    </select>
+                                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                    <label className="form-label">رابط مجلد Google Drive (اختياري)</label>
+                                    <input className="form-input" style={{ direction: 'ltr' }} value={form.drive_folder_url} onChange={e => setForm(f => ({ ...f, drive_folder_url: e.target.value }))} placeholder="https://drive.google.com/..." />
                                 </div>
                             </div>
                         </div>
                         <div className="modal-footer">
                             <button className="btn btn-secondary" onClick={() => setShowModal(false)}>إلغاء</button>
                             <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'جاري الحفظ...' : 'حفظ'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {repsDept && (
+                <div className="modal-overlay" onClick={() => setRepsDept(null)}>
+                    <div className="modal" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <span className="modal-title">ممثلو {repsDept.name_ar}</span>
+                            <button className="modal-close" onClick={() => setRepsDept(null)}>✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                                {(repsDept.representatives || []).map(r => (
+                                    <div key={r.id} className="flex items-center justify-between" style={{ padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 8 }}>
+                                        <div>
+                                            <div style={{ fontSize: 13, fontWeight: 500 }}>{r.full_name_ar || r.full_name}</div>
+                                            <div style={{ fontSize: 12, color: 'var(--gray-400)', direction: 'ltr', textAlign: 'right' }}>{r.email}</div>
+                                        </div>
+                                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => removeRep(r.id)}>إزالة</button>
+                                    </div>
+                                ))}
+                                {(!repsDept.representatives || repsDept.representatives.length === 0) && <p style={{ fontSize: 13, color: 'var(--gray-400)', textAlign: 'center' }}>لا يوجد ممثلون بعد</p>}
+                            </div>
+                            <div className="flex gap-2">
+                                <select className="form-select" value={newRep} onChange={e => setNewRep(e.target.value)}>
+                                    <option value="">اختر مستخدماً (بدور ممثل قسم)...</option>
+                                    {availableReps.map(u => <option key={u.id} value={u.id}>{u.full_name_ar || u.full_name} ({u.email})</option>)}
+                                </select>
+                                <button className="btn btn-primary btn-sm" onClick={addRep} disabled={!newRep}>إضافة</button>
+                            </div>
                         </div>
                     </div>
                 </div>

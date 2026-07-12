@@ -28,10 +28,11 @@ export const authAPI = {
     changePassword: (data) => api.post('/auth/change-password', data),
 };
 
-export const dashboardAPI = {
-    summary: (params) => api.get('/dashboard/summary', { params }),
-    trends: () => api.get('/dashboard/trends'),
-    categoryScores: (params) => api.get('/dashboard/category-scores', { params }),
+export const usersAPI = {
+    list: () => api.get('/users'),
+    create: (data) => api.post('/users', data),
+    update: (id, data) => api.put(`/users/${id}`, data),
+    delete: (id) => api.delete(`/users/${id}`),
 };
 
 export const departmentsAPI = {
@@ -41,16 +42,49 @@ export const departmentsAPI = {
     update: (id, data) => api.put(`/departments/${id}`, data),
     delete: (id) => api.delete(`/departments/${id}`),
     colleges: () => api.get('/departments/colleges/list'),
+    addRepresentative: (deptId, data) => api.post(`/departments/${deptId}/representatives`, data),
+    removeRepresentative: (deptId, userId) => api.delete(`/departments/${deptId}/representatives/${userId}`),
 };
 
-export const dataAPI = {
-    metrics: () => api.get('/data/metrics'),
-    periods: () => api.get('/data/periods'),
-    entries: (params) => api.get('/data/entries', { params }),
-    saveEntry: (data) => api.post('/data/entries', data),
-    bulkSave: (data) => api.post('/data/entries/bulk', data),
-    approve: (id) => api.put(`/data/entries/${id}/approve`),
-    upload: (formData) => api.post('/data/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+export const periodsAPI = {
+    list: () => api.get('/periods'),
+    get: (id) => api.get(`/periods/${id}`),
+    create: (data) => api.post('/periods', data),
+    update: (id, data) => api.put(`/periods/${id}`, data),
+    setIndicators: (id, indicators) => api.put(`/periods/${id}/indicators`, { indicators }),
+};
+
+export const indicatorsAPI = {
+    list: () => api.get('/indicators'),
+    get: (id) => api.get(`/indicators/${id}`),
+    create: (data) => api.post('/indicators', data),
+    update: (id, data) => api.put(`/indicators/${id}`, data),
+    delete: (id) => api.delete(`/indicators/${id}`),
+    addCriterion: (indicatorId, data) => api.post(`/indicators/${indicatorId}/criteria`, data),
+    updateCriterion: (criterionId, data) => api.put(`/indicators/criteria/${criterionId}`, data),
+};
+
+export const submissionsAPI = {
+    matrix: (params) => api.get('/submissions/matrix', { params }),
+    save: (data) => api.post('/submissions', data),
+    uploadDocuments: (submissionId, formData) => api.post(`/submissions/${submissionId}/documents`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    downloadDocument: (docId) => api.get(`/submissions/documents/${docId}/download`, { responseType: 'blob' }),
+    deleteDocument: (docId) => api.delete(`/submissions/documents/${docId}`),
+};
+
+export const evaluationsAPI = {
+    matrix: (params) => api.get('/evaluations/matrix', { params }),
+    save: (data) => api.post('/evaluations', data),
+    scoresIndicators: (params) => api.get('/evaluations/scores/indicators', { params }),
+    scoresDepartments: (params) => api.get('/evaluations/scores/departments', { params }),
+    scoresColleges: (params) => api.get('/evaluations/scores/colleges', { params }),
+};
+
+export const dashboardAPI = {
+    summary: (params) => api.get('/dashboard/summary', { params }),
+    trends: () => api.get('/dashboard/trends'),
+    indicatorScores: (params) => api.get('/dashboard/indicator-scores', { params }),
+    pendingReviews: (params) => api.get('/dashboard/pending-reviews', { params }),
 };
 
 export const reportsAPI = {
@@ -64,13 +98,6 @@ export const notificationsAPI = {
     read: (id) => api.put(`/notifications/${id}/read`),
     readAll: () => api.put('/notifications/read-all'),
     create: (data) => api.post('/notifications', data),
-};
-
-export const usersAPI = {
-    list: () => api.get('/users'),
-    create: (data) => api.post('/users', data),
-    update: (id, data) => api.put(`/users/${id}`, data),
-    delete: (id) => api.delete(`/users/${id}`),
 };
 
 export default api;

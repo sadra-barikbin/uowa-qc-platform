@@ -148,20 +148,23 @@ university-platform/
 ├── frontend/
 │   └── src/
 │       ├── components/
-│       │   ├── Auth/Login.js         # Login page with demo buttons
-│       │   ├── Layout/Layout.js      # Sidebar + top header
-│       │   ├── Dashboard/Dashboard.js # KPIs + Bar/Donut/Line charts
+│       │   ├── Auth/Login.js           # Login page with demo buttons
+│       │   ├── Layout/Layout.js        # Sidebar + top header, role-aware nav
+│       │   ├── Dashboard/Dashboard.js  # KPIs + Bar/Donut/Line charts
 │       │   ├── Departments/
-│       │   │   ├── Departments.js    # Dept cards grouped by college
-│       │   │   └── DepartmentDetail.js # Per-dept data view
-│       │   ├── DataEntry/DataEntry.js # Metric entry form + Excel upload
-│       │   ├── Analytics/Analytics.js # Radar + comparison + export
-│       │   ├── Users/Users.js        # User management (admin)
-│       │   └── Notifications/...     # Notification feed
+│       │   │   ├── Departments.js      # Dept/college CRUD + representative assignment (admin)
+│       │   │   └── DepartmentDetail.js # Per-dept indicator score breakdown
+│       │   ├── Submissions/Submissions.js   # Dept rep: upload evidence per criterion
+│       │   ├── Evaluations/Evaluations.js   # Reviewer: score evidence per criterion
+│       │   ├── Periods/Periods.js           # Evaluation period + indicator-weight management (admin)
+│       │   ├── Indicators/Indicators.js     # Indicator + criteria management (admin)
+│       │   ├── Analytics/Analytics.js  # Radar + comparison + export
+│       │   ├── Users/Users.js          # User management (admin)
+│       │   └── Notifications/...       # Notification feed
 │       ├── contexts/AuthContext.js   # JWT auth state
 │       ├── utils/api.js              # Axios client + all API calls
 │       ├── styles/global.css         # RTL CSS design system
-│       └── App.js                    # Router + PrivateRoute
+│       └── App.js                    # Router + role-gated PrivateRoute
 │
 ├── database/
 │   └── schema.sql               # PostgreSQL schema + seed categories

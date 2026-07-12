@@ -6,7 +6,8 @@ import {
     Chart as ChartJS, CategoryScale, LinearScale, BarElement,
     LineElement, PointElement, ArcElement, Title, Tooltip, Legend, Filler
 } from 'chart.js';
-import { dashboardAPI, reportsAPI, dataAPI } from '../../utils/api';
+import { dashboardAPI, periodsAPI } from '../../utils/api';
+import { useAuth } from '../../contexts/AuthContext';
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend, Filler);
 
 const scoreColor = s => s >= 90 ? '#0e9f6e' : s >= 70 ? '#1a56db' : s >= 50 ? '#c27803' : '#e02424';
@@ -16,16 +17,17 @@ const pClass = s => s >= 90 ? 'good' : s >= 70 ? 'primary' : s >= 50 ? 'ok' : 'b
 
 export default function Dashboard() {
     const navigate = useNavigate();
+    const { can } = useAuth();
     const [summary, setSummary] = useState(null);
     const [trends, setTrends] = useState([]);
     const [periods, setPeriods] = useState([]);
     const [selPeriod, setSelPeriod] = useState('');
-    const [catScores, setCatScores] = useState([]);
+    const [indicatorScores, setIndicatorScores] = useState([]);
+    const [pendingReviews, setPendingReviews] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [exporting, setExporting] = useState(false);
 
     useEffect(() => {
-        dataAPI.periods().then(r => {
+        periodsAPI.list().then(r => {
             const ps = r.data.periods || [];
             setPeriods(ps);
             if (ps[0]) setSelPeriod(ps[0].id);
@@ -36,25 +38,17 @@ export default function Dashboard() {
     useEffect(() => {
         if (!selPeriod) return;
         setLoading(true);
-        Promise.all([dashboardAPI.summary({ period_id: selPeriod }), dashboardAPI.categoryScores({ period_id: selPeriod })])
-            .then(([s, c]) => { setSummary(s.data); setCatScores(c.data.categories || []); })
+        const calls = [dashboardAPI.summary({ period_id: selPeriod }), dashboardAPI.indicatorScores({ period_id: selPeriod })];
+        if (can('admin', 'qc_head')) calls.push(dashboardAPI.pendingReviews({ period_id: selPeriod }));
+        Promise.all(calls)
+            .then(([s, i, p]) => { setSummary(s.data); setIndicatorScores(i.data.indicators || []); setPendingReviews(p?.data?.pending_reviews ?? null); })
             .catch(() => toast.error('خطأ في تحميل البيانات'))
             .finally(() => setLoading(false));
     }, [selPeriod]);
 
-    const exportExcel = async () => {
-        setExporting(true);
-        try {
-            const res = await reportsAPI.exportExcel({ period_id: selPeriod });
-            const url = URL.createObjectURL(new Blob([res.data]));
-            const a = document.createElement('a'); a.href = url; a.download = 'report.xlsx'; a.click();
-            URL.revokeObjectURL(url);
-        } catch { toast.error('خطأ في التصدير'); }
-        finally { setExporting(false); }
-    };
-
     const depts = summary?.departments || [];
-    const top10 = [...depts].sort((a, b) => b.score - a.score).slice(0, 10);
+    const scored = depts.filter(d => d.score !== null);
+    const top10 = [...scored].sort((a, b) => b.score - a.score).slice(0, 10);
 
     const barData = {
         labels: top10.map(d => (d.name_ar || '').substring(0, 12)),
@@ -69,10 +63,10 @@ export default function Dashboard() {
     const lineOpts = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' }, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } };
 
     const distBuckets = [
-        { label: 'ممتاز ≥90%', count: depts.filter(d => d.score >= 90).length, color: '#0e9f6e' },
-        { label: 'جيد 70-89%', count: depts.filter(d => d.score >= 70 && d.score < 90).length, color: '#1a56db' },
-        { label: 'متوسط 50-69%', count: depts.filter(d => d.score >= 50 && d.score < 70).length, color: '#c27803' },
-        { label: 'ضعيف <50%', count: depts.filter(d => d.score < 50).length, color: '#e02424' },
+        { label: 'ممتاز ≥90%', count: scored.filter(d => d.score >= 90).length, color: '#0e9f6e' },
+        { label: 'جيد 70-89%', count: scored.filter(d => d.score >= 70 && d.score < 90).length, color: '#1a56db' },
+        { label: 'متوسط 50-69%', count: scored.filter(d => d.score >= 50 && d.score < 70).length, color: '#c27803' },
+        { label: 'ضعيف <50%', count: scored.filter(d => d.score < 50).length, color: '#e02424' },
     ];
     const doughnutData = { labels: distBuckets.map(b => b.label), datasets: [{ data: distBuckets.map(b => b.count), backgroundColor: distBuckets.map(b => b.color + 'cc'), borderColor: distBuckets.map(b => b.color), borderWidth: 2 }] };
     const doughnutOpts = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 10 } } }, cutout: '60%' };
@@ -86,9 +80,7 @@ export default function Dashboard() {
                         {periods.map(p => <option key={p.id} value={p.id}>{p.label_ar || `${p.month}/${p.year}`}</option>)}
                     </select>
                 </div>
-                <button className="btn btn-secondary btn-sm" onClick={exportExcel} disabled={exporting || !selPeriod}>
-                    {exporting ? 'جاري التصدير...' : 'تصدير Excel'}
-                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => navigate('/analytics')}>التقارير والتصدير ←</button>
             </div>
 
             <div className="metric-grid">
@@ -96,7 +88,8 @@ export default function Dashboard() {
                     { label: 'عدد الأقسام', value: summary?.summary?.total_departments ?? '—', sub: 'قسم وكلية نشطة', cls: 'primary' },
                     { label: 'متوسط الأداء الكلي', value: summary ? `${summary.summary.avg_score?.toFixed(1)}%` : '—', sub: scoreLabel(summary?.summary?.avg_score || 0), cls: 'success' },
                     { label: 'أقسام ممتازة ≥90%', value: summary?.summary?.excellent_count ?? '—', sub: 'من إجمالي الأقسام', cls: 'success' },
-                    { label: 'تحتاج انتباهاً <50%', value: summary?.summary?.needs_attention_count ?? '—', sub: 'بيانات منقوصة أو ضعيفة', cls: 'danger' },
+                    { label: 'تحتاج انتباهاً <50%', value: summary?.summary?.needs_attention_count ?? '—', sub: 'أداء ضعيف أو غير مُقيَّم', cls: 'danger' },
+                    ...(can('admin', 'qc_head') ? [{ label: 'مستندات بانتظار المراجعة', value: pendingReviews ?? '—', sub: 'لهذه الفترة', cls: 'warning' }] : []),
                 ].map((m, i) => (
                     <div key={i} className={`metric-card ${m.cls}`}>
                         <div className="metric-card-label">{m.label}</div>
@@ -119,15 +112,15 @@ export default function Dashboard() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
                 <div className="card">
-                    <div className="card-header"><span className="card-title">اتجاه الأداء (آخر 6 أشهر)</span></div>
+                    <div className="card-header"><span className="card-title">اتجاه الأداء (آخر فترات)</span></div>
                     <div className="card-body" style={{ height: 200 }}>
                         {trends.length > 0 ? <Line data={lineData} options={lineOpts} /> : <div className="empty-state" style={{ padding: 40 }}><p>لا توجد بيانات تاريخية بعد</p></div>}
                     </div>
                 </div>
                 <div className="card">
-                    <div className="card-header"><span className="card-title">نسبة الإنجاز حسب المحور</span></div>
+                    <div className="card-header"><span className="card-title">نسبة الإنجاز حسب المؤشر</span></div>
                     <div className="card-body" style={{ maxHeight: 220, overflowY: 'auto' }}>
-                        {catScores.map(c => (
+                        {indicatorScores.map(c => (
                             <div key={c.id} style={{ marginBottom: 10 }}>
                                 <div className="flex justify-between" style={{ fontSize: 12, marginBottom: 3 }}>
                                     <span>{c.name_ar}</span>
@@ -136,7 +129,7 @@ export default function Dashboard() {
                                 <div className="progress-bar"><div className={`progress-fill ${pClass(c.avg_score)}`} style={{ width: `${c.avg_score}%` }} /></div>
                             </div>
                         ))}
-                        {catScores.length === 0 && <p style={{ textAlign:'center', color:'var(--gray-400)', fontSize:13 }}>اختر فترة زمنية</p>}
+                        {indicatorScores.length === 0 && <p style={{ textAlign:'center', color:'var(--gray-400)', fontSize:13 }}>لا توجد تقييمات بعد لهذه الفترة</p>}
                     </div>
                 </div>
             </div>
@@ -148,7 +141,7 @@ export default function Dashboard() {
                 </div>
                 <div className="table-wrap">
                     <table>
-                        <thead><tr><th>#</th><th>الكلية / القسم</th><th>نسبة الإنجاز</th><th>المستوى</th><th>التقدم</th><th>البيانات</th></tr></thead>
+                        <thead><tr><th>#</th><th>الكلية / القسم</th><th>نسبة الإنجاز</th><th>المستوى</th><th>التقدم</th></tr></thead>
                         <tbody>
                             {depts.map((d, i) => (
                                 <tr key={d.id} onClick={() => navigate(`/departments/${d.id}`)} style={{ cursor: 'pointer' }}>
@@ -157,10 +150,19 @@ export default function Dashboard() {
                                         <div style={{ fontWeight: 500 }}>{d.name_ar}</div>
                                         {d.college && <div style={{ fontSize: 12, color: 'var(--gray-400)' }}>{d.college.name_ar}</div>}
                                     </td>
-                                    <td><strong style={{ color: scoreColor(d.score) }}>{d.score.toFixed(1)}%</strong></td>
-                                    <td><span className={`badge ${scoreBadge(d.score)}`}>{scoreLabel(d.score)}</span></td>
-                                    <td style={{ minWidth: 100 }}><div className="progress-bar"><div className={`progress-fill ${pClass(d.score)}`} style={{ width: `${d.score}%` }} /></div></td>
-                                    <td style={{ fontSize: 13, color: 'var(--gray-500)' }}>{d.entries_count}</td>
+                                    {d.score !== null ? (
+                                        <>
+                                            <td><strong style={{ color: scoreColor(d.score) }}>{d.score.toFixed(1)}%</strong></td>
+                                            <td><span className={`badge ${scoreBadge(d.score)}`}>{scoreLabel(d.score)}</span></td>
+                                            <td style={{ minWidth: 100 }}><div className="progress-bar"><div className={`progress-fill ${pClass(d.score)}`} style={{ width: `${d.score}%` }} /></div></td>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <td style={{ color: 'var(--gray-400)' }}>—</td>
+                                            <td><span className="badge badge-gray">لم يُقيَّم بعد</span></td>
+                                            <td style={{ minWidth: 100 }}><div className="progress-bar" /></td>
+                                        </>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>

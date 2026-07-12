@@ -3,15 +3,29 @@ import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { notificationsAPI } from '../../utils/api';
 
-const ROLE_LABELS = { admin: 'مدير النظام', department_head: 'رئيس القسم', data_entry: 'إدخال بيانات', viewer: 'مشاهد' };
+const ROLE_LABELS = { admin: 'وحدة ضمان الجودة', qc_head: 'رئيس قسم الجودة', dept_rep: 'ممثل القسم', viewer: 'مشاهد' };
 const NAV = [
     { to: '/', icon: '▣', label: 'لوحة التحكم', exact: true },
     { to: '/departments', icon: '⊞', label: 'الأقسام والكليات' },
-    { to: '/data-entry', icon: '✎', label: 'إدخال البيانات', roles: ['admin','department_head','data_entry'] },
+    { to: '/submissions', icon: '⇪', label: 'رفع المستندات', roles: ['admin', 'qc_head', 'dept_rep'] },
+    { to: '/evaluations', icon: '✔', label: 'المراجعة والتقييم', roles: ['admin', 'qc_head'] },
+    { to: '/periods', icon: '⧗', label: 'الفترات التقييمية', roles: ['admin'] },
+    { to: '/indicators', icon: '☰', label: 'المؤشرات والمعايير', roles: ['admin'] },
     { to: '/analytics', icon: '⊿', label: 'التحليلات والتقارير' },
     { to: '/notifications', icon: '⌚', label: 'الإشعارات', badge: true },
     { to: '/users', icon: '⊙', label: 'المستخدمون', roles: ['admin'] },
 ];
+const PAGE_TITLES = {
+    '/': 'لوحة التحكم',
+    '/departments': 'الأقسام والكليات',
+    '/submissions': 'رفع المستندات',
+    '/evaluations': 'المراجعة والتقييم',
+    '/periods': 'الفترات التقييمية',
+    '/indicators': 'المؤشرات والمعايير',
+    '/analytics': 'التحليلات والتقارير',
+    '/notifications': 'الإشعارات',
+    '/users': 'المستخدمون',
+};
 
 export default function Layout() {
     const { user, logout, can } = useAuth();
@@ -19,8 +33,7 @@ export default function Layout() {
     const navigate = useNavigate();
     const [unread, setUnread] = useState(0);
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const PAGE_TITLES = { '/': 'لوحة التحكم', '/departments': 'الأقسام والكليات', '/data-entry': 'إدخال البيانات', '/analytics': 'التحليلات والتقارير', '/notifications': 'الإشعارات', '/users': 'المستخدمون' };
-    const pageTitle = PAGE_TITLES[location.pathname] || 'لوحة متابعة الأداء';
+    const pageTitle = PAGE_TITLES[location.pathname] || 'نظام متابعة الأداء';
 
     useEffect(() => {
         notificationsAPI.list().then(r => setUnread(r.data.unread_count)).catch(() => {});
@@ -38,7 +51,7 @@ export default function Layout() {
                         <div className="sidebar-logo-icon">J</div>
                         <div>
                             <div className="sidebar-logo-text">نظام متابعة الأداء</div>
-                            <div className="sidebar-logo-sub">الجامعة الأهلية</div>
+                            <div className="sidebar-logo-sub">وحدة ضمان الجودة</div>
                         </div>
                     </div>
                 </div>

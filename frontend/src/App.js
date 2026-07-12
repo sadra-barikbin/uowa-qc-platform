@@ -7,7 +7,10 @@ import Login from './components/Auth/Login';
 import Dashboard from './components/Dashboard/Dashboard';
 import Departments from './components/Departments/Departments';
 import DepartmentDetail from './components/Departments/DepartmentDetail';
-import DataEntry from './components/DataEntry/DataEntry';
+import Submissions from './components/Submissions/Submissions';
+import Evaluations from './components/Evaluations/Evaluations';
+import Periods from './components/Periods/Periods';
+import Indicators from './components/Indicators/Indicators';
 import Analytics from './components/Analytics/Analytics';
 import Users from './components/Users/Users';
 import Notifications from './components/Notifications/Notifications';
@@ -30,7 +33,10 @@ function AppRoutes() {
                 <Route index element={<Dashboard />} />
                 <Route path="departments" element={<Departments />} />
                 <Route path="departments/:id" element={<DepartmentDetail />} />
-                <Route path="data-entry" element={<PrivateRoute roles={['admin','department_head','data_entry']}><DataEntry /></PrivateRoute>} />
+                <Route path="submissions" element={<PrivateRoute roles={['admin','qc_head','dept_rep']}><Submissions /></PrivateRoute>} />
+                <Route path="evaluations" element={<PrivateRoute roles={['admin','qc_head']}><Evaluations /></PrivateRoute>} />
+                <Route path="periods" element={<PrivateRoute roles={['admin']}><Periods /></PrivateRoute>} />
+                <Route path="indicators" element={<PrivateRoute roles={['admin']}><Indicators /></PrivateRoute>} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="users" element={<PrivateRoute roles={['admin']}><Users /></PrivateRoute>} />
                 <Route path="notifications" element={<Notifications />} />

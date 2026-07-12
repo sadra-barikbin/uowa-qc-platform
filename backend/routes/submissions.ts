@@ -27,8 +27,11 @@ async function assertDepartmentAccess(req: Request, department_id: string): Prom
 }
 
 // GET /api/submissions?period_id=&department_id=
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, authorize('admin', 'qc_head', 'dept_rep'), async (req: Request, res: Response) => {
     const { period_id, department_id, criterion_id } = req.query as Record<string, string | undefined>;
+    if (!department_id && !['admin', 'qc_head'].includes(req.user!.role)) {
+        return res.status(400).json({ error: 'department_id is required' });
+    }
     const where: Record<string, string> = {};
     if (period_id) where.period_id = period_id;
     if (department_id) where.department_id = department_id;

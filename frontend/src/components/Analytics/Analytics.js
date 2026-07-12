@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Bar, Radar } from 'react-chartjs-2';
 import { Chart as ChartJS, RadialLinearScale, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Filler, Tooltip, Legend } from 'chart.js';
 import toast from 'react-hot-toast';
-import { reportsAPI, dataAPI, dashboardAPI } from '../../utils/api';
+import { reportsAPI, periodsAPI, dashboardAPI } from '../../utils/api';
 
 ChartJS.register(RadialLinearScale, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Filler, Tooltip, Legend);
 
@@ -16,7 +16,7 @@ export default function Analytics() {
     const [selPeriod, setSelPeriod] = useState('');
 
     useEffect(() => {
-        dataAPI.periods().then(r => {
+        periodsAPI.list().then(r => {
             const ps = r.data.periods || [];
             setPeriods(ps);
             if (ps[0]) { setPeriod1(ps[0].id); setSelPeriod(ps[0].id); }
@@ -26,7 +26,7 @@ export default function Analytics() {
 
     useEffect(() => {
         if (!selPeriod) return;
-        dashboardAPI.categoryScores({ period_id: selPeriod }).then(r => setCatScores(r.data.categories || [])).catch(() => {});
+        dashboardAPI.indicatorScores({ period_id: selPeriod }).then(r => setCatScores(r.data.indicators || [])).catch(() => {});
     }, [selPeriod]);
 
     const runComparison = async () => {
@@ -91,13 +91,13 @@ export default function Analytics() {
             {/* Radar chart */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
                 <div className="card">
-                    <div className="card-header"><span className="card-title">الرادار — أداء المحاور</span></div>
+                    <div className="card-header"><span className="card-title">الرادار — أداء المؤشرات</span></div>
                     <div className="card-body" style={{ height: 280 }}>
                         {catScores.length > 0 ? <Radar data={radarData} options={radarOpts} /> : <div className="empty-state" style={{ padding: 40 }}><p>اختر فترة زمنية</p></div>}
                     </div>
                 </div>
                 <div className="card">
-                    <div className="card-header"><span className="card-title">ترتيب المحاور (أعلى إلى أدنى)</span></div>
+                    <div className="card-header"><span className="card-title">ترتيب المؤشرات (أعلى إلى أدنى)</span></div>
                     <div className="card-body" style={{ maxHeight: 280, overflowY: 'auto' }}>
                         {[...catScores].sort((a, b) => b.avg_score - a.avg_score).map((c, i) => (
                             <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -138,10 +138,10 @@ export default function Analytics() {
                                     {comparison.map(c => (
                                         <tr key={c.department?.id}>
                                             <td>{c.department?.name_ar}</td>
-                                            <td>{c.period1_score}%</td>
-                                            <td>{c.period2_score}%</td>
-                                            <td style={{ fontWeight: 600, color: c.change >= 0 ? '#0e9f6e' : '#e02424' }}>
-                                                {c.change >= 0 ? '+' : ''}{c.change}%
+                                            <td>{c.period1_score != null ? `${c.period1_score}%` : '—'}</td>
+                                            <td>{c.period2_score != null ? `${c.period2_score}%` : '—'}</td>
+                                            <td style={{ fontWeight: 600, color: c.change == null ? 'var(--gray-400)' : c.change >= 0 ? '#0e9f6e' : '#e02424' }}>
+                                                {c.change == null ? '—' : `${c.change >= 0 ? '+' : ''}${c.change}%`}
                                             </td>
                                         </tr>
                                     ))}
