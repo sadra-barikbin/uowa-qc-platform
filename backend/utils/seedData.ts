@@ -1,11 +1,15 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcryptjs';
 import {
     sequelize, User, College, Department, DepartmentUser,
     Indicator, IndicatorCriterion, EvaluationPeriod, PeriodIndicator,
-    Submission, Evaluation, CriterionType,
+    Submission, SubmissionDocument, Evaluation, CriterionType,
 } from '../models';
 import { ensureViews, dropViews } from './ensureViews';
+
+const uploadDir = path.join(__dirname, '../uploads');
 
 interface CriterionSeed {
     code: string;
@@ -44,8 +48,10 @@ const INDICATOR_DATA: IndicatorSeed[] = [
           config: { numerator_label_ar: 'عدد المقررات المرفوع', denominator_label_ar: 'عدد المقررات المطلوب' } },
     ]},
     { code: 'curriculum-update', name_ar: 'المناهج والتحديث', name_en: 'Curriculum & Updates', criteria: [
-        { code: 'update-orders', name_ar: 'أوامر التحديث', type: 'checklist', weight: 0.5 },
-        { code: 'curriculum-comparison', name_ar: 'مقارنة المناهج', type: 'checklist', weight: 0.5 },
+        { code: 'update-form', name_ar: 'استمارة تحديث المنهج (موقّعة ومختومة)', type: 'checklist', weight: 0.5,
+          config: { ai_guidance: 'ابحث ضمن المستندات المرفقة عن استمارة تحديث المنهج الدراسي. امنح الدرجة 1 فقط عند تحقّق جميع الشروط: (أ) أن يكون المستند استمارة تحديث المنهج لا مستنداً آخر؛ (ب) أن تكون حقولها معبّأة فعلياً؛ (ج) أن تحمل توقيع الجهة المخوّلة (رئيس القسم أو العميد)؛ (د) أن تحمل الختم الرسمي للقسم أو الكلية. وإن كانت الاستمارة موجودة دون توقيع أو دون ختم فالدرجة 0. اذكر اسم الملف وما يدل على التوقيع والختم.' } },
+        { code: 'update-minutes', name_ar: 'محضر اجتماع تحديث المناهج', type: 'checklist', weight: 0.5,
+          config: { ai_guidance: 'ابحث عن محضر اجتماع يتضمّن التاريخ وأسماء الحضور والقرارات، وموضوعه تحديث المناهج أو مراجعتها لا موضوعاً آخر. امنح الدرجة 1 إذا تحقّق ذلك، وإلا 0. اذكر اسم الملف والبند الذي يظهر فيه موضوع الاجتماع.' } },
     ]},
     { code: 'community-service', name_ar: 'خدمة مجتمع', name_en: 'Community Service', criteria: [
         { code: 'orders-minutes', name_ar: 'أوامر إدارية + محضر', type: 'checklist', weight: 0.5 },
@@ -232,6 +238,29 @@ async function seed() {
         }
     }
     console.log('✅  Sample submissions and evaluations created');
+
+    // Demo evidence for the AI assessor: attach real files to the engineering dept's
+    // curriculum criteria so POST /api/evaluations/ai can be run end-to-end.
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    const evidenceText: Record<string, string> = {
+        'update-form': 'استمارة تحديث المنهج الدراسي\nالقسم: هندسة المدني\nالمقرر: تحليل إنشائي — تم تحديث المفردات للعام الدراسي الجديد.\nحقول الاستمارة معبّأة بالكامل.\nتوقيع رئيس القسم: (موقّع) د. علي\nالختم الرسمي: (مختوم) ختم قسم هندسة المدني',
+        'update-minutes': 'محضر اجتماع\nالتاريخ: 2026/03/05\nالحضور: رئيس القسم وأعضاء اللجنة العلمية\nالموضوع: مناقشة تحديث مناهج القسم\nالقرارات: الموافقة على تحديث مفردات مقرر التحليل الإنشائي.',
+    };
+    const curriculumCriteria = criteriaByIndicatorCode['curriculum-update'];
+    let evidenceCount = 0;
+    for (const c of curriculumCriteria) {
+        const submission = await Submission.findOne({ where: { period_id: period.id, department_id: engDept.id, criterion_id: c.id } });
+        if (!submission) continue;
+        const body = evidenceText[c.code] || 'مستند تجريبي';
+        const storedName = `seed-${c.code}-${Date.now()}.txt`;
+        fs.writeFileSync(path.join(uploadDir, storedName), body, 'utf8');
+        await SubmissionDocument.create({
+            submission_id: submission.id, file_name: `${c.name_ar}.txt`, storage_provider: 'local',
+            storage_path: storedName, mime_type: 'text/plain', size_bytes: Buffer.byteLength(body), uploaded_by: rep2.id,
+        });
+        evidenceCount++;
+    }
+    console.log(`✅  ${evidenceCount} demo evidence documents attached (engineering / تحديث المناهج)`);
 
     console.log('\n🎉  Seed complete!');
     console.log('\n📋  Login credentials:');

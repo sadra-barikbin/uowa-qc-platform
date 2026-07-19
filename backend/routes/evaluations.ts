@@ -5,6 +5,7 @@ import {
 } from '../models';
 import { authenticate, authorize } from '../middleware/auth';
 import { getIndicatorScores, getDepartmentScores, getCollegeScores } from '../utils/scores';
+import { aiEvaluateIndicator } from '../utils/aiEvaluator';
 
 // score a 'ratio' criterion from raw numbers, capped at 1
 function computeRatioScore(raw_values: { numerator?: number; denominator?: number } | undefined): number | null {
@@ -110,6 +111,21 @@ router.post('/', authenticate, authorize('admin', 'qc_head'), async (req: Reques
     if (submission_id) await Submission.update({ status: 'reviewed' }, { where: { id: submission_id } });
 
     res.status(created ? 201 : 200).json({ evaluation });
+});
+
+// POST /api/evaluations/ai — run the LLM assessor for one indicator of a department in a period
+router.post('/ai', authenticate, authorize('admin', 'qc_head'), async (req: Request, res: Response) => {
+    const { period_id, department_id, indicator_id } = req.body as { period_id?: string; department_id?: string; indicator_id?: string };
+    if (!period_id || !department_id || !indicator_id) {
+        return res.status(400).json({ error: 'period_id, department_id, indicator_id are required' });
+    }
+    try {
+        const result = await aiEvaluateIndicator(period_id, department_id, indicator_id, req.user!.id);
+        res.json(result);
+    } catch (err) {
+        const status = (err as { status?: number }).status || 500;
+        res.status(status).json({ error: (err as Error).message });
+    }
 });
 
 // GET /api/evaluations/scores/indicators?period_id=&department_id=

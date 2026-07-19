@@ -75,6 +75,7 @@ export const submissionsAPI = {
 export const evaluationsAPI = {
     matrix: (params) => api.get('/evaluations/matrix', { params }),
     save: (data) => api.post('/evaluations', data),
+    ai: (data) => api.post('/evaluations/ai', data),
     scoresIndicators: (params) => api.get('/evaluations/scores/indicators', { params }),
     scoresDepartments: (params) => api.get('/evaluations/scores/departments', { params }),
     scoresColleges: (params) => api.get('/evaluations/scores/colleges', { params }),
