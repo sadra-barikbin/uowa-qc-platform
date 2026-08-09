@@ -21,6 +21,7 @@ export default function Evaluations() {
     const [matrix, setMatrix] = useState([]);
     const [rowState, setRowState] = useState({}); // criterion_id -> { percent, numerator, denominator, notes }
     const [savingId, setSavingId] = useState(null);
+    const [aiId, setAiId] = useState(null);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -77,6 +78,17 @@ export default function Evaluations() {
             loadMatrix();
         } catch (err) { toast.error(err.response?.data?.error || 'خطأ في الحفظ'); }
         finally { setSavingId(null); }
+    };
+
+    const runAi = async (indicatorId) => {
+        setAiId(indicatorId);
+        try {
+            const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: indicatorId });
+            const { evaluated = [], skipped = [] } = r.data;
+            toast.success(`تقييم آلي: ${evaluated.length} معيار${skipped.length ? ` (تُخطّي ${skipped.length} بلا مستندات)` : ''}`);
+            loadMatrix();
+        } catch (err) { toast.error(err.response?.data?.error || 'خطأ في التقييم الآلي'); }
+        finally { setAiId(null); }
     };
 
     const download = async (doc) => {
@@ -156,7 +168,12 @@ export default function Evaluations() {
                 <div key={group.indicator.id} className="card" style={{ marginBottom: 16 }}>
                     <div className="card-header">
                         <span className="card-title">{group.indicator.name_ar}</span>
-                        <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>وزن المؤشر: {Math.round(group.indicator.weight * 100)}%</span>
+                        <div className="flex items-center gap-3">
+                            <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>وزن المؤشر: {Math.round(group.indicator.weight * 100)}%</span>
+                            <button className="btn btn-secondary btn-sm" onClick={() => runAi(group.indicator.id)} disabled={aiId === group.indicator.id}>
+                                {aiId === group.indicator.id ? 'جاري التقييم...' : '🤖 تقييم آلي'}
+                            </button>
+                        </div>
                     </div>
                     <div className="card-body" style={{ display: 'grid', gap: 14 }}>
                         {group.criteria.map(({ criterion, submission, evaluation }) => (
@@ -165,10 +182,22 @@ export default function Evaluations() {
                                     <div style={{ fontSize: 14, fontWeight: 500 }}>
                                         {criterion.name_ar} <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>({Math.round(criterion.weight * 100)}%)</span>
                                     </div>
-                                    {evaluation?.score != null && (
-                                        <span style={{ fontSize: 13, fontWeight: 600, color: scoreColor(Number(evaluation.score) * 100) }}>{(Number(evaluation.score) * 100).toFixed(0)}%</span>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                        {evaluation?.evaluation_method === 'ai' && (
+                                            <span className="badge badge-primary" style={{ fontSize: 11 }}>
+                                                🤖 آلي{evaluation.ai_confidence != null ? ` · ثقة ${Math.round(Number(evaluation.ai_confidence) * 100)}%` : ''}
+                                            </span>
+                                        )}
+                                        {evaluation?.score != null && (
+                                            <span style={{ fontSize: 13, fontWeight: 600, color: scoreColor(Number(evaluation.score) * 100) }}>{(Number(evaluation.score) * 100).toFixed(0)}%</span>
+                                        )}
+                                    </div>
                                 </div>
+                                {evaluation?.evaluation_method === 'ai' && evaluation?.ai_rationale && (
+                                    <p style={{ fontSize: 12, color: 'var(--gray-600)', marginBottom: 8, whiteSpace: 'pre-wrap', background: '#eef2ff', padding: '8px 10px', borderRadius: 6 }}>
+                                        🤖 {evaluation.ai_rationale}
+                                    </p>
+                                )}
 
                                 {submission?.notes && <p style={{ fontSize: 13, color: 'var(--gray-600)', marginBottom: 8 }}>ملاحظة الممثل: {submission.notes}</p>}
                                 {submission?.documents?.length > 0 ? (
