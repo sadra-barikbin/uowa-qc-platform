@@ -104,7 +104,9 @@ export async function aiEvaluateIndicator(
             + 'يذكر اسم الملف والدليل. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
     });
 
-    const client = new Anthropic(); // reads ANTHROPIC_API_KEY from env
+    // Bound the call: a single grading request runs ~30s, so a 2-min ceiling with one
+    // retry fails fast on a stalled connection instead of hanging on the SDK's 10-min default.
+    const client = new Anthropic({ timeout: 120_000, maxRetries: 1 }); // reads ANTHROPIC_API_KEY from env
     const response = await client.messages.create({
         model: MODEL,
         max_tokens: 4000,

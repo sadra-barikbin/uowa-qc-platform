@@ -48,10 +48,10 @@ const INDICATOR_DATA: IndicatorSeed[] = [
           config: { numerator_label_ar: 'عدد المقررات المرفوع', denominator_label_ar: 'عدد المقررات المطلوب' } },
     ]},
     { code: 'curriculum-update', name_ar: 'المناهج والتحديث', name_en: 'Curriculum & Updates', criteria: [
-        { code: 'update-form', name_ar: 'استمارة تحديث المنهج (موقّعة ومختومة)', type: 'checklist', weight: 0.5,
-          config: { ai_guidance: 'ابحث ضمن المستندات المرفقة عن استمارة تحديث المنهج الدراسي. امنح الدرجة 1 فقط عند تحقّق جميع الشروط: (أ) أن يكون المستند استمارة تحديث المنهج لا مستنداً آخر؛ (ب) أن تكون حقولها معبّأة فعلياً؛ (ج) أن تحمل توقيع الجهة المخوّلة (رئيس القسم أو العميد)؛ (د) أن تحمل الختم الرسمي للقسم أو الكلية. وإن كانت الاستمارة موجودة دون توقيع أو دون ختم فالدرجة 0. اذكر اسم الملف وما يدل على التوقيع والختم.' } },
-        { code: 'update-minutes', name_ar: 'محضر اجتماع تحديث المناهج', type: 'checklist', weight: 0.5,
-          config: { ai_guidance: 'ابحث عن محضر اجتماع يتضمّن التاريخ وأسماء الحضور والقرارات، وموضوعه تحديث المناهج أو مراجعتها لا موضوعاً آخر. امنح الدرجة 1 إذا تحقّق ذلك، وإلا 0. اذكر اسم الملف والبند الذي يظهر فيه موضوع الاجتماع.' } },
+        { code: 'update-form', name_ar: 'استمارة تحديث المقررات (وفق أهداف التنمية المستدامة)', type: 'checklist', weight: 0.5,
+          config: { ai_guidance: 'ابحث ضمن المستندات المرفقة عن استمارات تحديث المقررات الدراسية (نموذج وزارة التعليم العالي، رمز الاستمارة UOWA-00-11). امنح الدرجة 1 عند توفّر استمارة واحدة على الأقل مستوفية للشروط: (أ) أن تكون استمارة تحديث منهج/مقرر لا مستنداً آخر؛ (ب) أن تكون حقولها معبّأة فعلياً (القسم، اسم المقرر ورمزه، اسم التدريسي، جوانب التحديث وربطها بأهداف التنمية المستدامة)؛ (ج) أن تحمل توقيع التدريسي أو الجهة المخوّلة وتاريخاً. وإذا تعدّدت الاستمارات فقدّر الدرجة نسبياً بحسب عدد المقررات المشمولة واكتمالها وجودة ربطها بأهداف التنمية المستدامة. اذكر أسماء الملفات والمقررات وما يدل على التوقيع.' } },
+        { code: 'curriculum-comparison', name_ar: 'مقارنة المناهج مع الجامعات العالمية', type: 'checklist', weight: 0.5,
+          config: { ai_guidance: 'ابحث عن محضر اجتماع للجنة العلمية موضوعه مقارنة مناهج القسم مع مناهج جامعة عالمية رصينة. امنح الدرجة 1 إذا تضمّن المحضر: (أ) تاريخاً وأسماء أعضاء اللجنة (ويفضّل توقيعهم)؛ (ب) تحديد الجامعة أو الجهة المرجعية التي جرت المقارنة معها؛ (ج) نتيجة المقارنة (نسبة المطابقة أو التوصيات). وإلا فقدّر الدرجة نسبياً بحسب ما توفّر. اذكر اسم الملف والجامعة المرجعية ونتيجة المقارنة.' } },
     ]},
     { code: 'community-service', name_ar: 'خدمة مجتمع', name_en: 'Community Service', criteria: [
         { code: 'orders-minutes', name_ar: 'أوامر إدارية + محضر', type: 'checklist', weight: 0.5 },
@@ -163,12 +163,13 @@ async function seed() {
     console.log('✅  Aggregation views created');
 
     // Users
-    const [admin, , rep1, rep2] = await Promise.all([
+    const [admin, , rep1, rep2, , repHealth] = await Promise.all([
         User.create({ email: 'admin@uowa.edu.iq', password: await bcrypt.hash('Admin@123', 12), full_name: 'QC Unit', full_name_ar: 'وحدة ضمان الجودة', role: 'admin' }),
         User.create({ email: 'qc.head@uowa.edu.iq', password: await bcrypt.hash('Head@123', 12), full_name: 'Head of QC Department', full_name_ar: 'رئيس قسم ضمان الجودة', role: 'qc_head' }),
         User.create({ email: 'rep.islamic@uowa.edu.iq', password: await bcrypt.hash('Rep@123', 12), full_name: 'Islamic Sciences Rep', full_name_ar: 'ممثل العلوم الاسلامية', role: 'dept_rep' }),
         User.create({ email: 'rep.eng@uowa.edu.iq', password: await bcrypt.hash('Rep@123', 12), full_name: 'Engineering Rep', full_name_ar: 'ممثل الهندسة', role: 'dept_rep' }),
         User.create({ email: 'viewer@uowa.edu.iq', password: await bcrypt.hash('View@123', 12), full_name: 'Viewer', full_name_ar: 'مشاهد', role: 'viewer' }),
+        User.create({ email: 'rep.health@uowa.edu.iq', password: await bcrypt.hash('Rep@123', 12), full_name: 'Healthcare Mgmt Rep', full_name_ar: 'ممثل إدارة المؤسسات الصحية', role: 'dept_rep' }),
     ]);
     console.log('✅  Users created');
 
@@ -176,6 +177,7 @@ async function seed() {
     const departments: Department[] = [];
     let firstDept: Department | null = null;
     let engDept: Department | null = null;
+    let hcmDept: Department | null = null;
     for (const c of COLLEGE_DATA) {
         const college = await College.create({ name_en: c.name_en, name_ar: c.name_ar, code: c.code });
         for (const d of c.depts) {
@@ -183,14 +185,16 @@ async function seed() {
             departments.push(dept);
             if (c.code === 'ISL' && d.code === 'ISL-GEN') firstDept = dept;
             if (c.code === 'ENG' && d.code === 'CIVIL') engDept = dept;
+            if (c.code === 'ADM' && d.code === 'HCM') hcmDept = dept;
         }
     }
-    if (!firstDept || !engDept) throw new Error('Expected seed departments were not created');
+    if (!firstDept || !engDept || !hcmDept) throw new Error('Expected seed departments were not created');
     console.log(`✅  ${COLLEGE_DATA.length} colleges, ${departments.length} departments created`);
 
     await DepartmentUser.bulkCreate([
         { department_id: firstDept.id, user_id: rep1.id, is_primary_contact: true },
         { department_id: engDept.id, user_id: rep2.id, is_primary_contact: true },
+        { department_id: hcmDept.id, user_id: repHealth.id, is_primary_contact: true },
     ]);
 
     // Indicators & criteria
@@ -239,28 +243,54 @@ async function seed() {
     }
     console.log('✅  Sample submissions and evaluations created');
 
-    // Demo evidence for the AI assessor: attach real files to the engineering dept's
-    // curriculum criteria so POST /api/evaluations/ai can be run end-to-end.
+    // Real evidence for the AI assessor: the Healthcare-Management dept's actual
+    // curriculum-update forms and global-comparison minutes (from the QC Drive folder),
+    // attached — but left UNevaluated — so POST /api/evaluations/ai fills them in.
+    // Source PDFs live in backend/seed-assets/hcm-curriculum/ (see its README).
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    const evidenceText: Record<string, string> = {
-        'update-form': 'استمارة تحديث المنهج الدراسي\nالقسم: هندسة المدني\nالمقرر: تحليل إنشائي — تم تحديث المفردات للعام الدراسي الجديد.\nحقول الاستمارة معبّأة بالكامل.\nتوقيع رئيس القسم: (موقّع) د. علي\nالختم الرسمي: (مختوم) ختم قسم هندسة المدني',
-        'update-minutes': 'محضر اجتماع\nالتاريخ: 2026/03/05\nالحضور: رئيس القسم وأعضاء اللجنة العلمية\nالموضوع: مناقشة تحديث مناهج القسم\nالقرارات: الموافقة على تحديث مفردات مقرر التحليل الإنشائي.',
+    const seedAssetsDir = path.join(__dirname, '../seed-assets/hcm-curriculum');
+    const curriculumEvidence: Record<string, Array<{ asset: string; display: string }>> = {
+        'update-form': [
+            { asset: 'forms/computer.pdf',           display: 'استمارة تحديث منهج الحاسوب.pdf' },
+            { asset: 'forms/english.pdf',            display: 'استمارة تحديث منهج اللغة الانكليزية.pdf' },
+            { asset: 'forms/economics.pdf',          display: 'استمارة تحديث مادة مبادئ الاقتصاد.pdf' },
+            { asset: 'forms/statistics.pdf',         display: 'استمارة تحديث مادة الاحصاء.pdf' },
+            { asset: 'forms/medical-terms.pdf',      display: 'استمارة تحديث مادة المصطلحات الطبية.pdf' },
+            { asset: 'forms/health-it.pdf',          display: 'استمارة تحديث مادة تكنولوجيا المعلومات للمهن الصحية.pdf' },
+            { asset: 'forms/behavioral-ethics.pdf',  display: 'استمارة تحديث العلوم السلوكية والاخلاقية.pdf' },
+        ],
+        'curriculum-comparison': [
+            { asset: 'comparison/comparison-minutes.pdf', display: 'محضر اجتماع مقارنة المناهج مع الجامعات العالمية.pdf' },
+        ],
     };
     const curriculumCriteria = criteriaByIndicatorCode['curriculum-update'];
     let evidenceCount = 0;
     for (const c of curriculumCriteria) {
-        const submission = await Submission.findOne({ where: { period_id: period.id, department_id: engDept.id, criterion_id: c.id } });
-        if (!submission) continue;
-        const body = evidenceText[c.code] || 'مستند تجريبي';
-        const storedName = `seed-${c.code}-${Date.now()}.txt`;
-        fs.writeFileSync(path.join(uploadDir, storedName), body, 'utf8');
-        await SubmissionDocument.create({
-            submission_id: submission.id, file_name: `${c.name_ar}.txt`, storage_provider: 'local',
-            storage_path: storedName, mime_type: 'text/plain', size_bytes: Buffer.byteLength(body), uploaded_by: rep2.id,
+        // Only attach assets that are actually present. If none are (e.g. you upload the
+        // evidence through the frontend instead), leave the criterion blank for the rep.
+        const files = (curriculumEvidence[c.code] || []).filter(f => fs.existsSync(path.join(seedAssetsDir, f.asset)));
+        if (files.length === 0) continue;
+        // Fresh submission for HCM (no manual Evaluation — the AI assessor scores it).
+        const submission = await Submission.create({
+            period_id: period.id, department_id: hcmDept.id, criterion_id: c.id,
+            status: 'submitted', submitted_by: repHealth.id, submitted_at: new Date(),
         });
-        evidenceCount++;
+        for (const f of files) {
+            const src = path.join(seedAssetsDir, f.asset);
+            const storedName = `seed-hcm-${c.code}-${path.basename(f.asset)}`;
+            fs.copyFileSync(src, path.join(uploadDir, storedName));
+            await SubmissionDocument.create({
+                submission_id: submission.id, file_name: f.display, storage_provider: 'local',
+                storage_path: storedName, mime_type: 'application/pdf', size_bytes: fs.statSync(src).size, uploaded_by: repHealth.id,
+            });
+            evidenceCount++;
+        }
     }
-    console.log(`✅  ${evidenceCount} demo evidence documents attached (engineering / تحديث المناهج)`);
+    if (evidenceCount > 0) {
+        console.log(`✅  ${evidenceCount} real evidence documents attached (HCM / المناهج والتحديث)`);
+    } else {
+        console.log('ℹ️   No local seed-assets found — HCM curriculum left blank for upload via the frontend');
+    }
 
     console.log('\n🎉  Seed complete!');
     console.log('\n📋  Login credentials:');
@@ -268,6 +298,7 @@ async function seed() {
     console.log('   QC Head:          qc.head@uowa.edu.iq / Head@123');
     console.log('   Dept Rep:         rep.islamic@uowa.edu.iq / Rep@123');
     console.log('   Dept Rep:         rep.eng@uowa.edu.iq / Rep@123');
+    console.log('   Dept Rep (HCM):   rep.health@uowa.edu.iq / Rep@123');
     console.log('   Viewer:           viewer@uowa.edu.iq / View@123');
     process.exit(0);
 }
