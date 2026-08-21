@@ -27,7 +27,7 @@ export default function Login() {
         <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#1a56db', padding:20 }}>
             <div style={{ background:'#fff', borderRadius:16, padding:'40px 36px', width:'100%', maxWidth:420, boxShadow:'0 20px 60px rgba(0,0,0,.2)' }}>
                 <div style={{ textAlign:'center', marginBottom:32 }}>
-                    <div style={{ width:56, height:56, background:'#1a56db', borderRadius:14, margin:'0 auto 14px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, color:'#fff', fontWeight:700 }}>J</div>
+                    <img src="/uowa-logo-b.svg" alt="شعار جامعة وارث الأنبياء" style={{ height:80, margin:'0 auto 16px', display:'block' }} />
                     <h1 style={{ fontSize:20, fontWeight:700, color:'#111827', marginBottom:4 }}>نظام متابعة الأداء الأكاديمي</h1>
                     <p style={{ fontSize:13, color:'#6b7280' }}>تسجيل الدخول إلى حسابك</p>
                 </div>

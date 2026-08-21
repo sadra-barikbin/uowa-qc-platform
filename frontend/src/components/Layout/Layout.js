@@ -48,7 +48,7 @@ export default function Layout() {
             <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
                 <div className="sidebar-header">
                     <div className="sidebar-logo">
-                        <div className="sidebar-logo-icon">J</div>
+                        <img src="/uowa-logo-b.svg" alt="شعار جامعة وارث الأنبياء" className="sidebar-logo-img" />
                         <div>
                             <div className="sidebar-logo-text">نظام متابعة الأداء</div>
                             <div className="sidebar-logo-sub">وحدة ضمان الجودة</div>
