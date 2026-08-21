@@ -110,8 +110,10 @@ router.post('/:id/documents', authenticate, authorize('admin', 'qc_head', 'dept_
     const files = req.files as Express.Multer.File[] | undefined;
     if (!files?.length) return res.status(400).json({ error: 'No files uploaded' });
 
+    // multer/busboy decodes the multipart filename header as latin1, which mangles UTF-8
+    // (Arabic) names; re-interpret the original bytes as UTF-8 to store the real name.
     const documents = await SubmissionDocument.bulkCreate(files.map(f => ({
-        submission_id: submission.id, file_name: f.originalname, storage_provider: 'local' as const,
+        submission_id: submission.id, file_name: Buffer.from(f.originalname, 'latin1').toString('utf8'), storage_provider: 'local' as const,
         storage_path: f.filename, mime_type: f.mimetype, size_bytes: f.size, uploaded_by: req.user!.id,
     })));
     if (submission.status === 'pending') await submission.update({ status: 'submitted', submitted_by: req.user!.id, submitted_at: new Date() });
