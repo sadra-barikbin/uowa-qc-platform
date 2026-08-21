@@ -203,7 +203,12 @@ PeriodIndicator.init({
     weight:      { type: DataTypes.DECIMAL(5, 4), defaultValue: 1.0 },
     sort_order:  { type: DataTypes.INTEGER, defaultValue: 0 },
     is_active:   { type: DataTypes.BOOLEAN, defaultValue: true },
-}, { sequelize, tableName: 'period_indicators' });
+}, {
+    sequelize, tableName: 'period_indicators',
+    // Each (period, indicator) pair is unique — this backs the ON CONFLICT in the
+    // "set period indicators" upsert (routes/periods.ts) and matches schema.sql.
+    indexes: [{ unique: true, fields: ['period_id', 'indicator_id'] }],
+});
 
 // ── Submission ────────────────────────────────────────────────
 export class Submission extends Model<InferAttributes<Submission>, InferCreationAttributes<Submission>> {

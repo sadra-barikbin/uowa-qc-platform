@@ -12,26 +12,60 @@ const uploadDir = path.join(__dirname, '../uploads');
 const IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const TEXT_MIME = new Set(['text/plain', 'text/markdown', 'text/csv']);
 
-// Build an Anthropic content block for one stored document, or null if unreadable here.
-function documentBlock(doc: SubmissionDocument): Anthropic.ContentBlockParam | null {
-    if (doc.storage_provider !== 'local') return null;
+// PDFs larger than this are almost always high-resolution scans, whose raw base64 payload
+// makes the vision call time out. We rasterize those to downscaled JPEGs (grades in seconds).
+// Small PDFs stay on the native document path so their text layer is read directly.
+const RASTERIZE_OVER_BYTES = 1_500_000;
+const TARGET_PX = 1568;   // Claude downsamples images past this anyway
+const JPEG_QUALITY = 80;
+
+// mupdf is ESM-only (top-level await); load it via a real dynamic import that TypeScript's
+// CommonJS output won't rewrite into require().
+const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
+let mupdfPromise: Promise<any> | null = null;
+const loadMupdf = () => (mupdfPromise ??= dynamicImport('mupdf'));
+
+// Render each PDF page to a downscaled JPEG (≤ TARGET_PX on the long edge).
+async function rasterizePdf(data: Buffer): Promise<Buffer[]> {
+    const mupdf = await loadMupdf();
+    const doc = mupdf.Document.openDocument(new Uint8Array(data), 'application/pdf');
+    const pages: Buffer[] = [];
+    for (let i = 0; i < doc.countPages(); i++) {
+        const page = doc.loadPage(i);
+        const b = page.getBounds();
+        const scale = Math.min(TARGET_PX / Math.max(b[2] - b[0], b[3] - b[1]), 3);
+        const pixmap = page.toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false);
+        pages.push(Buffer.from(pixmap.asJPEG(JPEG_QUALITY)));
+    }
+    return pages;
+}
+
+// Build Anthropic content block(s) for one stored document ([] if unreadable here).
+async function documentBlocks(doc: SubmissionDocument): Promise<Anthropic.ContentBlockParam[]> {
+    if (doc.storage_provider !== 'local') return [];
     let data: Buffer;
     try {
         data = fs.readFileSync(path.join(uploadDir, doc.storage_path));
     } catch {
-        return null;
+        return [];
     }
     const mime = doc.mime_type || '';
     if (mime === 'application/pdf') {
-        return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: data.toString('base64') } };
+        if (data.length > RASTERIZE_OVER_BYTES) {
+            try {
+                const pages = await rasterizePdf(data);
+                if (pages.length) return pages.map(p => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: p.toString('base64') } }));
+            } catch { /* fall back to sending the raw PDF */ }
+        }
+        return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: data.toString('base64') } }];
     }
     if (IMAGE_MIME.has(mime)) {
-        return { type: 'image', source: { type: 'base64', media_type: mime as 'image/png', data: data.toString('base64') } };
+        return [{ type: 'image', source: { type: 'base64', media_type: mime as 'image/png', data: data.toString('base64') } }];
     }
     if (TEXT_MIME.has(mime)) {
-        return { type: 'document', source: { type: 'text', media_type: 'text/plain', data: data.toString('utf8') } };
+        return [{ type: 'document', source: { type: 'text', media_type: 'text/plain', data: data.toString('utf8') } }];
     }
-    return null;
+    return [];
 }
 
 interface CriterionResult {
@@ -81,7 +115,7 @@ export async function aiEvaluateIndicator(
 
     for (const c of criteria) {
         const docs = subByCriterion[c.id]?.documents || [];
-        const blocks = docs.map(documentBlock).filter((b): b is Anthropic.ContentBlockParam => b !== null);
+        const blocks = (await Promise.all(docs.map(documentBlocks))).flat();
         if (blocks.length === 0) {
             skipped.push({ criterion_id: c.id, name_ar: c.name_ar, reason: 'لا توجد مستندات قابلة للقراءة' });
             continue;
@@ -104,38 +138,48 @@ export async function aiEvaluateIndicator(
             + 'يذكر اسم الملف والدليل. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
     });
 
-    // Bound the call: a single grading request runs ~30s, so a 2-min ceiling with one
-    // retry fails fast on a stalled connection instead of hanging on the SDK's 10-min default.
+    // Bound the call: a normal grading request runs well under a minute, so a 2-min ceiling
+    // with one retry fails fast instead of hanging on the SDK's 10-min default (and burning
+    // tokens on its default retries). Heavy scanned PDFs can still exceed this — handled below.
     const client = new Anthropic({ timeout: 120_000, maxRetries: 1 }); // reads ANTHROPIC_API_KEY from env
-    const response = await client.messages.create({
-        model: MODEL,
-        max_tokens: 4000,
-        tools: [{
-            name: 'record_scores',
-            description: 'Record the per-criterion assessment results.',
-            input_schema: {
-                type: 'object',
-                properties: {
-                    results: {
-                        type: 'array',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                criterion_id: { type: 'string' },
-                                score: { type: 'number', description: '0..1' },
-                                confidence: { type: 'number', description: '0..1' },
-                                rationale: { type: 'string' },
+    let response;
+    try {
+        response = await client.messages.create({
+            model: MODEL,
+            max_tokens: 4000,
+            tools: [{
+                name: 'record_scores',
+                description: 'Record the per-criterion assessment results.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        results: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    criterion_id: { type: 'string' },
+                                    score: { type: 'number', description: '0..1' },
+                                    confidence: { type: 'number', description: '0..1' },
+                                    rationale: { type: 'string' },
+                                },
+                                required: ['criterion_id', 'score', 'confidence', 'rationale'],
                             },
-                            required: ['criterion_id', 'score', 'confidence', 'rationale'],
                         },
                     },
+                    required: ['results'],
                 },
-                required: ['results'],
-            },
-        }],
-        tool_choice: { type: 'tool', name: 'record_scores' },
-        messages: [{ role: 'user', content }],
-    });
+            }],
+            tool_choice: { type: 'tool', name: 'record_scores' },
+            messages: [{ role: 'user', content }],
+        });
+    } catch (err) {
+        const e = err as { name?: string; status?: number; message?: string };
+        if (e?.name === 'APIConnectionTimeoutError' || /timed out/i.test(e?.message || '')) {
+            throw new HttpError(504, 'انتهت مهلة التقييم الآلي — قد تكون المستندات كبيرة الحجم أو ممسوحة ضوئياً بدقة عالية. يُنصح بمراجعتها يدوياً أو رفع نسخ أصغر حجماً.');
+        }
+        throw new HttpError(e?.status || 502, `تعذّر الاتصال بخدمة التقييم: ${e?.message || 'خطأ غير معروف'}`);
+    }
 
     const toolUse = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
     if (!toolUse) throw new HttpError(502, 'LLM did not return structured results');
