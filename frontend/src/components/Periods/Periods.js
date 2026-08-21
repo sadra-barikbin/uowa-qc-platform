@@ -151,17 +151,41 @@ export default function Periods() {
                             <span className="modal-title">مؤشرات {indicatorsPeriod.label_ar}</span>
                             <button className="modal-close" onClick={() => setIndicatorsPeriod(null)}>✕</button>
                         </div>
-                        <div className="modal-body" style={{ maxHeight: 420, overflowY: 'auto' }}>
-                            {allIndicators.map(ind => {
-                                const row = indicatorRows.find(r => r.indicator_id === ind.id);
-                                return (
-                                    <div key={ind.id} className="flex items-center gap-3" style={{ padding: '8px 0', borderBottom: '1px solid var(--gray-100)' }}>
-                                        <input type="checkbox" checked={row?.is_active || false} onChange={e => updateRow(ind.id, { is_active: e.target.checked })} />
-                                        <span style={{ flex: 1, fontSize: 13 }}>{ind.name_ar}</span>
-                                        <input type="number" step="0.1" className="form-input" style={{ width: 80 }} value={row?.weight ?? 1} onChange={e => updateRow(ind.id, { weight: Number(e.target.value) })} disabled={!row?.is_active} />
-                                    </div>
-                                );
-                            })}
+                        <div className="modal-body">
+                            <div className="flex items-center gap-3" style={{ padding: '0 0 8px', fontSize: 12, fontWeight: 700, color: 'var(--gray-500)', borderBottom: '2px solid var(--gray-200)' }}>
+                                <span style={{ width: 40, textAlign: 'center' }}>مفعّل</span>
+                                <span style={{ flex: 1 }}>المؤشر</span>
+                                <span style={{ width: 80, textAlign: 'center' }}>الوزن</span>
+                            </div>
+                            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                                {allIndicators.map(ind => {
+                                    const row = indicatorRows.find(r => r.indicator_id === ind.id);
+                                    return (
+                                        <div key={ind.id} className="flex items-center gap-3" style={{ padding: '8px 0', borderBottom: '1px solid var(--gray-100)' }}>
+                                            <label style={{ width: 40, display: 'flex', justifyContent: 'center', cursor: 'pointer' }}>
+                                                <input type="checkbox" checked={row?.is_active || false} onChange={e => updateRow(ind.id, { is_active: e.target.checked })} />
+                                            </label>
+                                            <span style={{ flex: 1, fontSize: 13 }}>{ind.name_ar}</span>
+                                            <input type="number" step="0.1" min="0" className="form-input" style={{ width: 80, textAlign: 'center' }} value={row?.weight ?? 1} onChange={e => updateRow(ind.id, { weight: Number(e.target.value) })} disabled={!row?.is_active} />
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <div style={{ marginTop: 16, padding: '14px 16px', background: 'var(--gray-50)', border: '1px solid var(--gray-200)', borderRadius: 10 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-600)', marginBottom: 12, textAlign: 'center' }}>كيف تُحتسب النسبة النهائية للقسم؟</div>
+                                <div className="flex items-center justify-center gap-3" style={{ flexWrap: 'wrap', fontSize: 13, color: 'var(--gray-700)' }}>
+                                    <span style={{ fontWeight: 600 }}>النسبة النهائية</span>
+                                    <span style={{ fontSize: 20, color: 'var(--gray-400)' }}>=</span>
+                                    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', lineHeight: 1.5 }}>
+                                        <span style={{ padding: '0 10px 6px' }}>مجموع ( درجة المؤشر × وزنه )</span>
+                                        <span style={{ borderTop: '2px solid #043468', padding: '6px 10px 0', width: '100%' }}>مجموع الأوزان</span>
+                                    </span>
+                                </div>
+                                <p style={{ fontSize: 11, color: 'var(--gray-500)', marginTop: 12, lineHeight: 1.7, textAlign: 'center' }}>
+                                    الأوزان نسبية؛ ما يهم تناسبها لا قيمتها المطلقة — فالوزن <b>1</b> لكل المؤشرات يعني تساوي أهميتها. وإلغاء تفعيل مؤشر يستثنيه من الاحتساب.
+                                </p>
+                            </div>
                         </div>
                         <div className="modal-footer">
                             <button className="btn btn-secondary" onClick={() => setIndicatorsPeriod(null)}>إلغاء</button>
