@@ -3,6 +3,7 @@ import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import {
     Indicator, IndicatorCriterion, Submission, SubmissionDocument, Evaluation,
+    Department, College, EvaluationPeriod,
 } from '../models';
 
 // Default to Sonnet 5 (fast, reads Arabic + PDFs well); override via env to escalate to Opus.
@@ -129,10 +130,31 @@ export async function aiEvaluateIndicator(
     const subByCriterion: Record<string, Submission> = {};
     submissions.forEach(s => { subByCriterion[s.criterion_id] = s; });
 
-    // Build the message: for each criterion, its guidance + attached documents.
+    // Who/when this evaluation is for — the model needs this to catch evidence that is valid
+    // in form but belongs to a different department or a different (older) evaluation cycle.
+    const [department, period] = await Promise.all([
+        Department.findByPk(department_id, { include: [{ model: College, as: 'college' }] }),
+        EvaluationPeriod.findByPk(period_id),
+    ]);
+    const deptName = department?.name_ar || '(غير محدد)';
+    const collegeName = department?.college?.name_ar;
+    const periodLabel = period?.label_ar || (period ? `${period.month}/${period.year}` : '(غير محددة)');
+
+    // Build the message: provenance context first, then each criterion's guidance + documents.
     const content: Anthropic.ContentBlockParam[] = [];
     const gradable: IndicatorCriterion[] = [];
     const skipped: AiEvaluationResult['skipped'] = [];
+
+    content.push({
+        type: 'text',
+        text: `سياق التقييم:\n`
+            + `• القسم المعني: «${deptName}»${collegeName ? ` ضمن كلية «${collegeName}»` : ''}.\n`
+            + `• الفترة التقييمية الحالية: ${periodLabel}.\n`
+            + `تعليمات التحقق من مصدر المستندات:\n`
+            + `1) القسم: تأكّد أن كل مستند يعود فعلاً لهذا القسم أو كليته. فإذا كان المستند سليماً في شكله لكنه يخص قسماً أو كلية أخرى بوضوح، فاعتبر المعيار غير مستوفٍ (met=false أو درجة منخفضة) وبيّن السبب في التبرير.\n`
+            + `2) الفترة: اذكر تاريخ كل مستند إن وُجد. من الطبيعي أن يسبق تاريخُ الوثيقة فترةَ التقييم (كأن يكون الإجراء قد تمّ قبل رفع التقرير)، فلا تُسقِط المستند لمجرد أن تاريخه أقدم من الفترة؛ لكن إن بدا واضحاً أنه يعود لدورة تقييم سابقة أو لعام دراسي منصرم بما يجعله غير ذي صلة، فاخفض الدرجة ونبّه على ذلك.\n`
+            + `3) إن لم يُذكر القسم أو التاريخ صراحةً في المستند فلا تعاقِب لهذا السبب وحده، واعتمد على بقية القرائن.`,
+    });
 
     for (const c of criteria) {
         // ratio criteria mix an AI count with a human-supplied denominator → entered manually
