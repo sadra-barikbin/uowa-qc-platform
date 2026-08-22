@@ -3,7 +3,11 @@ import toast from 'react-hot-toast';
 import { indicatorsAPI } from '../../utils/api';
 
 const TYPE_LABEL = { checklist: 'قائمة تحقق', percentage: 'نسبة مئوية', ratio: 'نسبة (بسط/مقام)', score_100: 'درجة من 100' };
-const emptyCriterion = () => ({ name_ar: '', criterion_type: 'checklist', weight: 1 });
+const emptyCriterion = () => ({ name_ar: '', criterion_type: 'checklist', weight: 1, ai_guidance: '' });
+const GUIDANCE_PLACEHOLDER = 'تعليمات التقييم الآلي (اختياري) — صف ما يجب أن يبحث عنه المُقيِّم الآلي في المستندات ومتى يمنح الدرجة الكاملة';
+
+// Turn a criterion's flat ai_guidance field into the config payload the API stores.
+const toConfig = (c) => (c.ai_guidance && c.ai_guidance.trim() ? { ai_guidance: c.ai_guidance.trim() } : {});
 
 export default function Indicators() {
     const [indicators, setIndicators] = useState([]);
@@ -13,6 +17,8 @@ export default function Indicators() {
     const [saving, setSaving] = useState(false);
     const [addingCriterionTo, setAddingCriterionTo] = useState(null);
     const [newCriterion, setNewCriterion] = useState(emptyCriterion());
+    const [editingCriterion, setEditingCriterion] = useState(null); // criterion id being edited
+    const [editValues, setEditValues] = useState(null);
 
     const load = () => indicatorsAPI.list().then(r => setIndicators(r.data.indicators || [])).catch(() => {});
     useEffect(() => { load(); }, []);
@@ -28,7 +34,10 @@ export default function Indicators() {
         if (form.criteria.some(c => !c.name_ar)) { toast.error('كل معيار يحتاج اسماً'); return; }
         setSaving(true);
         try {
-            await indicatorsAPI.create(form);
+            await indicatorsAPI.create({
+                ...form,
+                criteria: form.criteria.map(c => ({ name_ar: c.name_ar, criterion_type: c.criterion_type, weight: c.weight, config: toConfig(c) })),
+            });
             toast.success('تم إنشاء المؤشر');
             await load();
             setShowModal(false);
@@ -44,13 +53,40 @@ export default function Indicators() {
     const addCriterion = async (indicatorId) => {
         if (!newCriterion.name_ar) { toast.error('اسم المعيار مطلوب'); return; }
         try {
-            await indicatorsAPI.addCriterion(indicatorId, newCriterion);
+            await indicatorsAPI.addCriterion(indicatorId, { name_ar: newCriterion.name_ar, criterion_type: newCriterion.criterion_type, weight: newCriterion.weight, config: toConfig(newCriterion) });
             toast.success('تمت إضافة المعيار');
             await load();
             setAddingCriterionTo(null);
             setNewCriterion(emptyCriterion());
         } catch (err) { toast.error(err.response?.data?.error || 'خطأ'); }
     };
+
+    const startEditCriterion = (c) => { setEditingCriterion(c.id); setEditValues({ name_ar: c.name_ar, criterion_type: c.criterion_type, weight: Number(c.weight), ai_guidance: c.config?.ai_guidance || '' }); };
+    const cancelEditCriterion = () => { setEditingCriterion(null); setEditValues(null); };
+    const saveEditCriterion = async () => {
+        if (!editValues.name_ar) { toast.error('اسم المعيار مطلوب'); return; }
+        try {
+            await indicatorsAPI.updateCriterion(editingCriterion, { name_ar: editValues.name_ar, criterion_type: editValues.criterion_type, weight: editValues.weight, config: toConfig(editValues) });
+            toast.success('تم تحديث المعيار');
+            await load();
+            cancelEditCriterion();
+        } catch (err) { toast.error(err.response?.data?.error || 'خطأ'); }
+    };
+
+    // Reusable name / type / weight row + AI-guidance textarea used by the create, add, and edit forms.
+    const criterionFields = (c, patch, { onRemove, removeDisabled } = {}) => (
+        <>
+            <div style={{ display: 'grid', gridTemplateColumns: onRemove ? '2fr 1fr 1fr auto' : '2fr 1fr 1fr', gap: 8, alignItems: 'center' }}>
+                <input className="form-input" placeholder="اسم المعيار" value={c.name_ar} onChange={e => patch({ name_ar: e.target.value })} />
+                <select className="form-select" value={c.criterion_type} onChange={e => patch({ criterion_type: e.target.value })}>
+                    {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <input type="number" step="0.1" className="form-input" placeholder="الوزن" value={c.weight} onChange={e => patch({ weight: Number(e.target.value) })} />
+                {onRemove && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={onRemove} disabled={removeDisabled}>حذف</button>}
+            </div>
+            <textarea className="form-textarea" style={{ fontSize: 12, minHeight: 58, marginTop: 8 }} placeholder={GUIDANCE_PLACEHOLDER} value={c.ai_guidance} onChange={e => patch({ ai_guidance: e.target.value })} />
+        </>
+    );
 
     return (
         <div>
@@ -73,24 +109,37 @@ export default function Indicators() {
                             <div className="card-body">
                                 <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
                                     {(ind.criteria || []).map(c => (
-                                        <div key={c.id} className="flex items-center justify-between" style={{ padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 8 }}>
-                                            <span style={{ fontSize: 13 }}>{c.name_ar}</span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="badge badge-gray">{TYPE_LABEL[c.criterion_type]}</span>
-                                                <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>وزن {Math.round(Number(c.weight) * 100)}%</span>
+                                        editingCriterion === c.id ? (
+                                            <div key={c.id} style={{ padding: '12px', background: 'var(--gray-50)', borderRadius: 8, border: '1px solid var(--primary-light)' }}>
+                                                {criterionFields(editValues, patch => setEditValues(v => ({ ...v, ...patch })))}
+                                                <p style={{ fontSize: 11, color: 'var(--warning)', margin: '8px 0 0' }}>ملاحظة: يؤثر التعديل على جميع الفترات التي تستخدم هذا المؤشر.</p>
+                                                <div className="flex items-center gap-2" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+                                                    <button className="btn btn-ghost btn-sm" onClick={cancelEditCriterion}>إلغاء</button>
+                                                    <button className="btn btn-primary btn-sm" onClick={saveEditCriterion}>حفظ</button>
+                                                </div>
                                             </div>
-                                        </div>
+                                        ) : (
+                                            <div key={c.id} className="flex items-center justify-between" style={{ padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 8 }}>
+                                                <span style={{ fontSize: 13 }}>
+                                                    {c.name_ar}
+                                                    {c.config?.ai_guidance && <span title="لديه تعليمات تقييم آلي" style={{ marginRight: 6 }}>🤖</span>}
+                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="badge badge-gray">{TYPE_LABEL[c.criterion_type]}</span>
+                                                    <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>وزن {Math.round(Number(c.weight) * 100)}%</span>
+                                                    <button className="btn btn-ghost btn-sm" onClick={() => startEditCriterion(c)}>تعديل</button>
+                                                </div>
+                                            </div>
+                                        )
                                     ))}
                                 </div>
                                 {addingCriterionTo === ind.id ? (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto auto', gap: 8, alignItems: 'center' }}>
-                                        <input className="form-input" placeholder="اسم المعيار" value={newCriterion.name_ar} onChange={e => setNewCriterion(c => ({ ...c, name_ar: e.target.value }))} />
-                                        <select className="form-select" value={newCriterion.criterion_type} onChange={e => setNewCriterion(c => ({ ...c, criterion_type: e.target.value }))}>
-                                            {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                                        </select>
-                                        <input type="number" step="0.1" className="form-input" placeholder="الوزن" value={newCriterion.weight} onChange={e => setNewCriterion(c => ({ ...c, weight: Number(e.target.value) }))} />
-                                        <button className="btn btn-primary btn-sm" onClick={() => addCriterion(ind.id)}>حفظ</button>
-                                        <button className="btn btn-ghost btn-sm" onClick={() => setAddingCriterionTo(null)}>إلغاء</button>
+                                    <div style={{ padding: '12px', background: 'var(--gray-50)', borderRadius: 8, border: '1px solid var(--gray-200)' }}>
+                                        {criterionFields(newCriterion, patch => setNewCriterion(c => ({ ...c, ...patch })))}
+                                        <div className="flex items-center gap-2" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+                                            <button className="btn btn-ghost btn-sm" onClick={() => setAddingCriterionTo(null)}>إلغاء</button>
+                                            <button className="btn btn-primary btn-sm" onClick={() => addCriterion(ind.id)}>حفظ</button>
+                                        </div>
                                     </div>
                                 ) : (
                                     <button className="btn btn-ghost btn-sm" onClick={() => { setAddingCriterionTo(ind.id); setNewCriterion(emptyCriterion()); }}>+ إضافة معيار</button>
@@ -130,15 +179,10 @@ export default function Indicators() {
                             </div>
 
                             <label className="form-label">المعايير</label>
-                            <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                            <div style={{ display: 'grid', gap: 10, marginBottom: 8 }}>
                                 {form.criteria.map((c, i) => (
-                                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
-                                        <input className="form-input" placeholder="اسم المعيار" value={c.name_ar} onChange={e => updateCriterionRow(i, { name_ar: e.target.value })} />
-                                        <select className="form-select" value={c.criterion_type} onChange={e => updateCriterionRow(i, { criterion_type: e.target.value })}>
-                                            {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                                        </select>
-                                        <input type="number" step="0.1" className="form-input" placeholder="الوزن" value={c.weight} onChange={e => updateCriterionRow(i, { weight: Number(e.target.value) })} />
-                                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => removeCriterionRow(i)} disabled={form.criteria.length === 1}>حذف</button>
+                                    <div key={i} style={{ padding: '12px', border: '1px solid var(--gray-200)', borderRadius: 8 }}>
+                                        {criterionFields(c, patch => updateCriterionRow(i, patch), { onRemove: () => removeCriterionRow(i), removeDisabled: form.criteria.length === 1 })}
                                     </div>
                                 ))}
                             </div>
