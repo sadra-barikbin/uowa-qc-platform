@@ -88,10 +88,11 @@ router.delete('/:id', authenticate, authorize('admin'), async (req: Request, res
 // POST /api/indicators/:id/criteria — add a criterion to an existing indicator
 router.post('/:id/criteria', authenticate, authorize('admin'), async (req: Request, res: Response) => {
     const { code, name_en, name_ar, description_en, description_ar, criterion_type, weight, config, requires_evidence, sort_order } = req.body;
-    if (!code || !name_ar) return res.status(400).json({ error: 'code and name_ar are required' });
+    if (!name_ar) return res.status(400).json({ error: 'name_ar is required' });
 
     const criterion = await IndicatorCriterion.create({
-        indicator_id: req.params.id, code, name_en: name_en || name_ar, name_ar,
+        // auto-generate a code when the client doesn't supply one (mirrors POST /indicators)
+        indicator_id: req.params.id, code: code || `c-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name_en: name_en || name_ar, name_ar,
         description_en, description_ar, criterion_type: criterion_type || 'checklist',
         weight: weight ?? 1.0, config: config || {}, requires_evidence: requires_evidence ?? true, sort_order: sort_order ?? 0,
     });
