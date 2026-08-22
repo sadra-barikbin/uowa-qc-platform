@@ -4,7 +4,8 @@ import {
 import { sequelize } from '../config/database';
 
 export type UserRole = 'admin' | 'qc_head' | 'dept_rep' | 'viewer';
-export type CriterionType = 'checklist' | 'percentage' | 'ratio' | 'score_100';
+export type CriterionType = 'binary' | 'checklist' | 'percentage' | 'ratio';
+export const CRITERION_TYPES: CriterionType[] = ['binary', 'checklist', 'percentage', 'ratio'];
 export type PeriodStatus = 'draft' | 'open' | 'under_review' | 'published' | 'closed';
 export type SubmissionStatus = 'pending' | 'submitted' | 'needs_revision' | 'reviewed';
 export type StorageProvider = 'local' | 'google_drive';
@@ -152,7 +153,7 @@ IndicatorCriterion.init({
     name_ar:           { type: DataTypes.STRING, allowNull: false },
     description_en:    { type: DataTypes.TEXT },
     description_ar:    { type: DataTypes.TEXT },
-    criterion_type:    { type: DataTypes.ENUM('checklist', 'percentage', 'ratio', 'score_100'), defaultValue: 'checklist' },
+    criterion_type:    { type: DataTypes.STRING(20), defaultValue: 'checklist', validate: { isIn: [CRITERION_TYPES] } },
     weight:            { type: DataTypes.DECIMAL(5, 4), defaultValue: 1.0 },
     config:            { type: DataTypes.JSONB, defaultValue: {} },
     requires_evidence: { type: DataTypes.BOOLEAN, defaultValue: true },

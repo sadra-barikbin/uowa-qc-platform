@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { indicatorsAPI } from '../../utils/api';
 
-const TYPE_LABEL = { checklist: 'قائمة تحقق', percentage: 'نسبة مئوية', ratio: 'نسبة (بسط/مقام)', score_100: 'درجة من 100' };
+const TYPE_LABEL = { binary: 'ثنائي (نعم/لا)', checklist: 'قائمة تحقق', percentage: 'نسبة مئوية', ratio: 'نسبة (بسط/مقام)' };
 const emptyCriterion = () => ({ name_ar: '', criterion_type: 'checklist', weight: 1, ai_guidance: '' });
 const GUIDANCE_PLACEHOLDER = 'تعليمات التقييم الآلي (اختياري) — صف ما يجب أن يبحث عنه المُقيِّم الآلي في المستندات ومتى يمنح الدرجة الكاملة';
 
