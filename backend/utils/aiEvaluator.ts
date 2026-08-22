@@ -70,9 +70,30 @@ async function documentBlocks(doc: SubmissionDocument): Promise<Anthropic.Conten
 
 interface CriterionResult {
     criterion_id: string;
-    score: number;       // 0..1
+    score?: number;      // 0..1 — checklist (0/0.5/1) and percentage
+    met?: boolean;       // binary
     confidence: number;  // 0..1
     rationale: string;   // Arabic reasoning + citation
+}
+
+// Arabic description of the output the model must return for a given criterion type.
+function outputSpec(type: string): string {
+    if (type === 'binary') return 'ثنائي — أعِد met=true إذا كان المعيار مستوفى وإلا met=false';
+    if (type === 'checklist') return 'قائمة تحقق — أعِد score بإحدى القيم فقط: 0 (غير مستوفٍ) أو 0.5 (مستوفٍ جزئياً) أو 1 (مستوفٍ بالكامل)';
+    return 'نسبة مئوية — أعِد score رقماً بين 0 و1 يعبّر عن نسبة الاستيفاء';
+}
+
+const snapChecklist = (v: number): number => [0, 0.5, 1].reduce((best, o) => (Math.abs(o - v) < Math.abs(best - v) ? o : best), 0);
+
+// Coerce the model's answer into the 0..1 score the criterion's type allows.
+function normalizeAiScore(type: string, r?: CriterionResult): number {
+    if (!r) return 0;
+    if (type === 'binary') {
+        if (typeof r.met === 'boolean') return r.met ? 1 : 0;
+        return r.score != null && Number(r.score) >= 0.5 ? 1 : 0; // fallback if the model returned a score
+    }
+    const s = Math.min(1, Math.max(0, Number(r.score ?? (r.met ? 1 : 0))));
+    return type === 'checklist' ? snapChecklist(s) : s;
 }
 
 export interface AiEvaluationResult {
@@ -114,6 +135,11 @@ export async function aiEvaluateIndicator(
     const skipped: AiEvaluationResult['skipped'] = [];
 
     for (const c of criteria) {
+        // ratio criteria mix an AI count with a human-supplied denominator → entered manually
+        if (c.criterion_type === 'ratio') {
+            skipped.push({ criterion_id: c.id, name_ar: c.name_ar, reason: 'معيار نسبة — يُدخَل يدوياً' });
+            continue;
+        }
         const docs = subByCriterion[c.id]?.documents || [];
         const blocks = (await Promise.all(docs.map(documentBlocks))).flat();
         if (blocks.length === 0) {
@@ -122,8 +148,8 @@ export async function aiEvaluateIndicator(
         }
         gradable.push(c);
         const guidance = (c.config?.ai_guidance as string | undefined)
-            || `قيّم مدى استيفاء المعيار «${c.name_ar}» بالاعتماد على المستندات المرفقة. النوع: ${c.criterion_type}.`;
-        content.push({ type: 'text', text: `— المعيار (criterion_id: ${c.id}): ${c.name_ar}\nتعليمات التقييم: ${guidance}\nالمستندات التالية تخص هذا المعيار:` });
+            || `قيّم مدى استيفاء المعيار «${c.name_ar}» بالاعتماد على المستندات المرفقة.`;
+        content.push({ type: 'text', text: `— المعيار (criterion_id: ${c.id}): ${c.name_ar}\nنوع التقييم: ${outputSpec(c.criterion_type)}\nتعليمات التقييم: ${guidance}\nالمستندات التالية تخص هذا المعيار:` });
         content.push(...blocks);
     }
 
@@ -133,9 +159,10 @@ export async function aiEvaluateIndicator(
 
     content.push({
         type: 'text',
-        text: 'قيّم كل معيار مما سبق على حدة اعتماداً على مستنداته. أعِد لكل معيار درجة score بين 0 و1 '
-            + '(1 = مستوفٍ بالكامل، 0 = غير مستوفٍ)، ودرجة ثقة confidence بين 0 و1، وتبريراً موجزاً بالعربية '
-            + 'يذكر اسم الملف والدليل. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
+        text: 'قيّم كل معيار مما سبق على حدة اعتماداً على مستنداته ووفق «نوع التقييم» المحدد له: '
+            + 'للمعيار الثنائي أعِد met (true/false)، ولمعيار قائمة التحقق أعِد score بإحدى القيم 0 أو 0.5 أو 1، '
+            + 'ولمعيار النسبة المئوية أعِد score رقماً بين 0 و1. وأعِد لكل معيار درجة ثقة confidence بين 0 و1 '
+            + 'وتبريراً موجزاً بالعربية يذكر اسم الملف والدليل. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
     });
 
     // Bound the call: a normal grading request runs well under a minute, so a 2-min ceiling
@@ -159,11 +186,12 @@ export async function aiEvaluateIndicator(
                                 type: 'object',
                                 properties: {
                                     criterion_id: { type: 'string' },
-                                    score: { type: 'number', description: '0..1' },
+                                    met: { type: 'boolean', description: 'binary criteria only: true if satisfied, false otherwise' },
+                                    score: { type: 'number', description: '0..1 — checklist (use 0, 0.5, or 1) and percentage criteria' },
                                     confidence: { type: 'number', description: '0..1' },
                                     rationale: { type: 'string' },
                                 },
-                                required: ['criterion_id', 'score', 'confidence', 'rationale'],
+                                required: ['criterion_id', 'confidence', 'rationale'],
                             },
                         },
                     },
@@ -190,7 +218,7 @@ export async function aiEvaluateIndicator(
     const evaluated: AiEvaluationResult['evaluated'] = [];
     for (const c of gradable) {
         const r = byId[c.id];
-        const score = r ? Math.min(1, Math.max(0, Number(r.score))) : 0;
+        const score = normalizeAiScore(c.criterion_type, r);
         const confidence = r && r.confidence != null ? Math.min(1, Math.max(0, Number(r.confidence))) : null;
         const rationale = r?.rationale || 'لم يُرجِع النموذج نتيجة لهذا المعيار.';
         const submission = subByCriterion[c.id];

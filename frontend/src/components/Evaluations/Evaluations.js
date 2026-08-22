@@ -150,12 +150,9 @@ export default function Evaluations() {
         if (criterion.criterion_type === 'ratio') {
             if (state.numerator === '' || state.denominator === '') { toast.error('أدخل البسط والمقام'); return; }
             payload.raw_values = { numerator: Number(state.numerator), denominator: Number(state.denominator) };
-        } else if (criterion.criterion_type === 'score_100') {
-            if (state.percent === '') { toast.error('أدخل الدرجة'); return; }
-            payload.score = Number(state.percent); // raw 0-100, backend divides
         } else {
-            if (state.percent === '') { toast.error('أدخل النسبة'); return; }
-            payload.score = Number(state.percent) / 100; // checklist / percentage: already a 0-1 fraction
+            if (state.percent === '') { toast.error('أدخل التقييم'); return; }
+            payload.score = Number(state.percent) / 100; // binary / checklist / percentage → 0-1 fraction
         }
         setSavingId(criterion.id);
         try {
@@ -172,8 +169,7 @@ export default function Evaluations() {
     const aiAcceptPayload = (criterion, evaluation, submissionId) => {
         const p = { period_id: selPeriod, department_id: selDept, criterion_id: criterion.id, submission_id: submissionId, reviewer_notes: evaluation.reviewer_notes || undefined };
         if (criterion.criterion_type === 'ratio') p.raw_values = evaluation.raw_values || {};
-        else if (criterion.criterion_type === 'score_100') p.score = Number(evaluation.score) * 100;
-        else p.score = Number(evaluation.score);
+        else p.score = Number(evaluation.score); // binary / checklist / percentage are 0-1
         return p; // no evaluation_method → stored as 'manual'
     };
 
@@ -278,6 +274,15 @@ export default function Evaluations() {
                 </div>
             );
         }
+        if (criterion.criterion_type === 'binary') {
+            return (
+                <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}>
+                    <option value="">لم يُقيَّم</option>
+                    <option value="100">نعم — مستوفٍ</option>
+                    <option value="0">لا — غير مستوفٍ</option>
+                </select>
+            );
+        }
         if (criterion.criterion_type === 'checklist') {
             return (
                 <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}>
@@ -293,7 +298,7 @@ export default function Evaluations() {
                 <input
                     type="number" min="0" max="100" className="form-input" style={{ paddingLeft: 28, textAlign: 'center' }}
                     value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}
-                    placeholder={criterion.criterion_type === 'score_100' ? '0-100' : '0-100%'}
+                    placeholder="0-100%"
                 />
                 <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)', fontSize: 13 }}>%</span>
             </div>

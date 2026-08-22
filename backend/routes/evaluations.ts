@@ -89,10 +89,9 @@ router.post('/', authenticate, authorize('admin', 'qc_head'), async (req: Reques
     if (criterion.criterion_type === 'ratio' && raw_values) {
         finalScore = computeRatioScore(raw_values);
         if (finalScore === null) return res.status(400).json({ error: 'raw_values.numerator and raw_values.denominator are required for ratio criteria' });
-    } else if (criterion.criterion_type === 'score_100' && score != null) {
-        finalScore = Math.min(Number(score) / 100, 1);
     }
     if (finalScore == null || Number.isNaN(Number(finalScore))) return res.status(400).json({ error: 'score (or raw_values for ratio criteria) is required' });
+    finalScore = Math.min(1, Math.max(0, Number(finalScore))); // binary / checklist / percentage all normalize to 0..1
 
     const [evaluation, created] = await Evaluation.findOrCreate({
         where: { period_id, department_id, criterion_id },
