@@ -129,7 +129,6 @@ const COLLEGE_DATA: CollegeSeed[] = [
         { code: 'NRS-GEN', name_ar: 'التمريض', name_en: 'Nursing' },
     ]},
     { code: 'MDA', name_ar: 'كلية الاعلام', name_en: 'College of Media', depts: [
-        { code: 'MDA-GEN', name_ar: 'الاعلام', name_en: 'Media (General)' },
         { code: 'DMDA', name_ar: 'الاعلام الرقمي', name_en: 'Digital Media' },
         { code: 'ADMKT', name_ar: 'الإعلان والاتصال والتسويق', name_en: 'Advertising, Communication & Marketing' },
     ]},
