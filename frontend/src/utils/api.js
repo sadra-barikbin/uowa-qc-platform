@@ -101,4 +101,10 @@ export const notificationsAPI = {
     create: (data) => api.post('/notifications', data),
 };
 
+export const settingsAPI = {
+    getAiEvalPrompt: () => api.get('/settings/ai-eval-prompt'),
+    saveAiEvalPrompt: (value) => api.put('/settings/ai-eval-prompt', { value }),
+    resetAiEvalPrompt: () => api.delete('/settings/ai-eval-prompt'),
+};
+
 export default api;

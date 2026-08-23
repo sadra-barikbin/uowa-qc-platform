@@ -20,6 +20,7 @@ import evaluationRoutes from './routes/evaluations';
 import reportRoutes from './routes/reports';
 import notificationRoutes from './routes/notifications';
 import dashboardRoutes from './routes/dashboard';
+import settingsRoutes from './routes/settings';
 import { sendDeadlineReminders } from './utils/notifications';
 
 const app = express();
@@ -57,6 +58,7 @@ app.use('/api/evaluations',   evaluationRoutes);
 app.use('/api/reports',       reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard',     dashboardRoutes);
+app.use('/api/settings',      settingsRoutes);
 
 // ── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date() }));
