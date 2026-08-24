@@ -10,7 +10,9 @@ import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
 
-const uploadDir = path.join(__dirname, '../uploads');
+// In the packaged desktop app the install dir is read-only, so uploads are redirected to a
+// writable location (Electron's userData) via UPLOAD_DIR. Falls back to the repo-local dir in dev.
+const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({

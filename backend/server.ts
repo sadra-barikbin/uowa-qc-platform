@@ -10,6 +10,10 @@ import cron from 'node-cron';
 
 import { sequelize } from './config/database';
 import { ensureViews, dropViews } from './utils/ensureViews';
+import { startPglite } from './utils/pglite';
+import { runMigrations } from './utils/migrator';
+import { ensureSeeded } from './utils/bootstrap';
+import { User } from './models';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import departmentRoutes from './routes/departments';
@@ -25,8 +29,17 @@ import { sendDeadlineReminders } from './utils/notifications';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// In the packaged desktop app the frontend is served from this same Express process (see below),
+// so it's all one local origin. PGLITE_DIR is the signal that we're running as the desktop app.
+const isDesktop = !!process.env.PGLITE_DIR;
+
 // ── Security middleware ───────────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // The bundled SPA (served same-origin) would otherwise trip helmet's default CSP on its
+    // inline styles/fonts. It's a local single-user app, so CSP adds no meaningful protection here.
+    contentSecurityPolicy: isDesktop ? false : undefined,
+}));
 app.use(cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
@@ -61,6 +74,19 @@ app.use('/api/dashboard',     dashboardRoutes);
 // ── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date() }));
 
+// ── Serve the built frontend (desktop app) ────────────────────
+// When FRONTEND_DIR is set, this process also serves the React build, so the whole app is one
+// local origin and the frontend's relative `/api` calls just work. Registered after all /api and
+// /uploads routes so those win; the SPA fallback returns index.html for client-side routing.
+if (process.env.FRONTEND_DIR) {
+    const frontendDir = process.env.FRONTEND_DIR;
+    app.use(express.static(frontendDir));
+    app.get('*', (req: Request, res: Response, next: NextFunction) => {
+        if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+        res.sendFile(path.join(frontendDir, 'index.html'));
+    });
+}
+
 // ── Global error handler ──────────────────────────────────────
 app.use((err: Error & { status?: number }, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);
@@ -81,13 +107,28 @@ cron.schedule('0 8 * * *', () => {
 // ── Start server ──────────────────────────────────────────────
 async function start() {
     try {
+        // Desktop: bring up the embedded Postgres (PGlite) before anything connects to it.
+        if (isDesktop) await startPglite();
+
         await sequelize.authenticate();
         console.log('✅  Database connected');
         await dropViews(sequelize);
-        await sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
-        console.log('✅  Models synced');
-        await ensureViews(sequelize);
-        console.log('✅  Aggregation views ready');
+
+        if (isDesktop) {
+            // Packaged app: models own the baseline (sync, create-only — never alter a user's DB),
+            // Umzug migrations carry existing installs forward, then views + first-run clean seed.
+            await sequelize.sync();
+            const fresh = (await User.count()) === 0;
+            await runMigrations(sequelize, { fresh });
+            await ensureViews(sequelize);
+            await ensureSeeded(sequelize);
+        } else {
+            // Dev/self-hosted against a real Postgres: unchanged behaviour.
+            await sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
+            await ensureViews(sequelize);
+        }
+        console.log('✅  Models synced, aggregation views ready');
+
         app.listen(PORT, () => console.log(`🚀  Server running on http://localhost:${PORT}`));
     } catch (err) {
         console.error('❌  Failed to start:', err);

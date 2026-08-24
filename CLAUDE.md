@@ -40,6 +40,30 @@ substitutes `${DB_PASSWORD}`/`${JWT_SECRET}` from a repo-root `.env`, but the ro
 `JWT_SECRET` at the repo root for docker-compose to pick them up instead of silently falling back to its
 hardcoded defaults.
 
+## Desktop app (packaged, single-user distribution)
+
+`desktop/` is an Electron shell that ships the whole stack as one installable, auto-updating Windows app
+for a single non-technical user (see `desktop/README.md`). It runs the **same** compiled backend as a child
+process, but with an **embedded PostgreSQL (PGlite)** database instead of a server Postgres: the backend
+starts `PGLiteSocketServer` (`backend/utils/pglite.ts`) on a local port and Sequelize connects to it through
+the ordinary `postgres` dialect — so **no models/queries/SQL change between dev and desktop**. Everything is
+switched on by env vars the shell sets (`PGLITE_DIR`, `FRONTEND_DIR`, `UPLOAD_DIR`, `PORT`, `JWT_SECRET`);
+when they're unset the backend behaves exactly as before. The DB + uploads live under Electron `userData` and
+survive updates.
+
+Two backend behaviours are desktop-only (guarded by `PGLITE_DIR`, in `server.ts`'s `start()`):
+- **Clean first-run seed** (`backend/utils/bootstrap.ts` `ensureSeeded`): real colleges/departments/13
+  indicators + one admin, seeded only when the DB is empty (`User.count() === 0`). It reuses the exported
+  `INDICATOR_DATA`/`COLLEGE_DATA`/`EXCLUDED_FROM_COMPOSITE` from `seedData.ts`. Note `seedData.ts`'s full demo
+  `seed()` now only runs under `if (require.main === module)` — importing it must stay side-effect-free, or it
+  would drop every table via `sync({ force: true })`.
+- **Migrations, not `sync({ alter })`** (`backend/utils/migrator.ts`, `backend/migrations/`): schema evolution
+  for an installed user's real data uses **Umzug** (the Sequelize-world Alembic; `SequelizeMeta` is the ledger).
+  On a fresh DB, `sync()` builds the schema and all migrations are baseline-stamped; on an existing DB,
+  `umzug.up()` applies only the new ones. **Discipline: every change to `models/index.ts` ships with a matching
+  migration in the same commit** — `sync()` keeps fresh installs correct, the migration keeps existing installs
+  correct. See `backend/migrations/README.md`.
+
 ## Architecture
 
 ### Domain model (the part that takes multiple files to understand)
