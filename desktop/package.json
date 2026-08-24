@@ -1,0 +1,26 @@
+{
+  "name": "uowa-qc-desktop",
+  "version": "1.0.0",
+  "description": "University QC Platform — desktop app (self-contained, auto-updating)",
+  "author": "UOWA QC Unit",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "stage": "node scripts/stage.js",
+    "icon": "node scripts/make-icon.js",
+    "start": "electron .",
+    "dev": "node scripts/stage.js && electron .",
+    "pack": "node scripts/stage.js && electron-builder --dir",
+    "build": "node scripts/stage.js && electron-builder",
+    "release": "node scripts/stage.js && electron-builder --publish always"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  }
+}

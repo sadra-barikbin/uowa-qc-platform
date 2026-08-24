@@ -11,7 +11,7 @@ import { ensureViews, dropViews } from './ensureViews';
 
 const uploadDir = path.join(__dirname, '../uploads');
 
-interface CriterionSeed {
+export interface CriterionSeed {
     code: string;
     name_ar: string;
     type: CriterionType;
@@ -19,15 +19,16 @@ interface CriterionSeed {
     config?: Record<string, unknown>;
 }
 
-interface IndicatorSeed {
+export interface IndicatorSeed {
     code: string;
     name_ar: string;
     name_en: string;
     criteria: CriterionSeed[];
 }
 
-// Indicator + criteria definitions, reconstructed from the department's real monthly report
-const INDICATOR_DATA: IndicatorSeed[] = [
+// Indicator + criteria definitions, reconstructed from the department's real monthly report.
+// Exported so the desktop clean-seed (utils/bootstrap.ts) reuses the exact same institutional data.
+export const INDICATOR_DATA: IndicatorSeed[] = [
     { code: 'program-accreditation', name_ar: 'الاعتماد البرامجي', name_en: 'Program Accreditation', criteria: [
         { code: 'workshops', name_ar: 'عقد ورش تثقيفية عن المتطلبات', type: 'checklist', weight: 1 },
         { code: 'committees', name_ar: 'تشكيل لجان خاصة لمتطلبات الاعتماد البرامجي', type: 'checklist', weight: 1 },
@@ -88,11 +89,11 @@ const INDICATOR_DATA: IndicatorSeed[] = [
     ]},
 ];
 
-interface DepartmentSeed { code: string; name_ar: string; name_en: string; }
-interface CollegeSeed { code: string; name_ar: string; name_en: string; depts: DepartmentSeed[]; }
+export interface DepartmentSeed { code: string; name_ar: string; name_en: string; }
+export interface CollegeSeed { code: string; name_ar: string; name_en: string; depts: DepartmentSeed[]; }
 
 // real college / department structure, reconstructed from the department's report
-const COLLEGE_DATA: CollegeSeed[] = [
+export const COLLEGE_DATA: CollegeSeed[] = [
     { code: 'ISL', name_ar: 'كلية العلوم الإسلامية', name_en: 'College of Islamic Sciences', depts: [
         { code: 'ISL-GEN', name_ar: 'العلوم الاسلاميه', name_en: 'Islamic Sciences (General)' },
         { code: 'QURAN', name_ar: 'علوم القران', name_en: 'Quran Sciences' },
@@ -153,7 +154,7 @@ const COLLEGE_DATA: CollegeSeed[] = [
 
 // indicators excluded from the monthly composite score by default (tracked, but informational —
 // matches the real report, where "قواعد الامتثال" doesn't feed into "تقييم شامل")
-const EXCLUDED_FROM_COMPOSITE = ['compliance-rules'];
+export const EXCLUDED_FROM_COMPOSITE = ['compliance-rules'];
 
 async function seed() {
     await dropViews(sequelize);
@@ -303,4 +304,9 @@ async function seed() {
     process.exit(0);
 }
 
-seed().catch(err => { console.error(err); process.exit(1); });
+// Only run the full demo seed when this file is executed directly (`npm run seed`), NOT when it is
+// imported for its exported data (e.g. by utils/bootstrap.ts) — importing must have no side effects,
+// and seed() drops every table via sync({ force: true }).
+if (require.main === module) {
+    seed().catch(err => { console.error(err); process.exit(1); });
+}
