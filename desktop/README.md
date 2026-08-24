@@ -43,10 +43,14 @@ Output lands in `desktop/dist/`:
    ```bash
    npm run release
    ```
-   This builds and uploads the installer + `latest.yml` to a GitHub Release on
-   `sadra-barikbin/uowa-qc-platform` (configured in [`electron-builder.yml`](electron-builder.yml)).
+   This builds and uploads the installer + `latest.yml` to a GitHub Release on the **public**
+   `sadra-barikbin/uowa-qc-releases` repo (configured in [`electron-builder.yml`](electron-builder.yml)).
+   That repo holds **only the installers** so downloads and auto-update work without authentication,
+   while the application source stays in the private `uowa-qc-platform` repo.
 
-Installed apps check that repo's Releases on launch, download in the background, and apply on restart.
+Installed apps check the public releases repo on launch, download in the background, and apply on
+restart. Releases are created as **drafts** by default — publish the draft on GitHub for it to reach
+users (or set `releaseType: release` under `publish:` in `electron-builder.yml` to publish directly).
 
 ## Useful scripts
 

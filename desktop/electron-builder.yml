@@ -31,8 +31,10 @@ nsis:
   allowToChangeInstallationDirectory: false
 
 # Auto-update feed. `npm run release` uploads the installer + latest.yml to a GitHub Release;
-# installed apps read this repo's Releases to find and apply updates.
+# installed apps read this repo's Releases to find and apply updates. This is a dedicated PUBLIC
+# repo holding only the installers, so downloads + auto-update work without authentication while
+# the application source stays in the private uowa-qc-platform repo.
 publish:
   provider: github
   owner: sadra-barikbin
-  repo: uowa-qc-platform
+  repo: uowa-qc-releases
