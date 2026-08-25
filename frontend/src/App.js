@@ -14,6 +14,7 @@ import Indicators from './components/Indicators/Indicators';
 import Analytics from './components/Analytics/Analytics';
 import Users from './components/Users/Users';
 import Notifications from './components/Notifications/Notifications';
+import Settings from './components/Settings/Settings';
 import './styles/global.css';
 
 function PrivateRoute({ children, roles }) {
@@ -39,6 +40,7 @@ function AppRoutes() {
                 <Route path="indicators" element={<PrivateRoute roles={['admin']}><Indicators /></PrivateRoute>} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="users" element={<PrivateRoute roles={['admin']}><Users /></PrivateRoute>} />
+                <Route path="settings" element={<PrivateRoute roles={['admin']}><Settings /></PrivateRoute>} />
                 <Route path="notifications" element={<Notifications />} />
             </Route>
             <Route path="*" element={<Navigate to="/" />} />

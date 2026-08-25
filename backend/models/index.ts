@@ -386,4 +386,16 @@ Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Notification.belongsTo(Department, { foreignKey: 'department_id', as: 'department' });
 Notification.belongsTo(EvaluationPeriod, { foreignKey: 'period_id', as: 'period' });
 
+// ── Settings (key-value app configuration) ───────────────────────────────────
+export class Setting extends Model<InferAttributes<Setting>, InferCreationAttributes<Setting>> {
+    declare key: string;
+    declare value: string;
+    declare updated_by: CreationOptional<string | null>;
+}
+Setting.init({
+    key:        { type: DataTypes.STRING(100), primaryKey: true },
+    value:      { type: DataTypes.TEXT, allowNull: false },
+    updated_by: { type: DataTypes.UUID, allowNull: true },
+}, { sequelize, tableName: 'settings' });
+
 export { sequelize };

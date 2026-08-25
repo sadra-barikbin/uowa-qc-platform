@@ -14,6 +14,7 @@ const NAV = [
     { to: '/analytics', icon: '⊿', label: 'التحليلات والتقارير' },
     { to: '/notifications', icon: '⌚', label: 'الإشعارات', badge: true },
     { to: '/users', icon: '⊙', label: 'المستخدمون', roles: ['admin'] },
+    { to: '/settings', icon: '⚙', label: 'إعدادات التقييم الآلي', roles: ['admin'] },
 ];
 const PAGE_TITLES = {
     '/': 'لوحة التحكم',
@@ -25,6 +26,7 @@ const PAGE_TITLES = {
     '/analytics': 'التحليلات والتقارير',
     '/notifications': 'الإشعارات',
     '/users': 'المستخدمون',
+    '/settings': 'إعدادات التقييم الآلي',
 };
 
 export default function Layout() {
