@@ -21,6 +21,7 @@
     "sharp": "^0.35.3"
   },
   "dependencies": {
+    "@sentry/electron": "^7.17.0",
     "electron-updater": "^6.3.9"
   }
 }

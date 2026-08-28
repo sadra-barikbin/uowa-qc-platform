@@ -39,7 +39,8 @@ Output lands in `desktop/dist/`:
 1. Bump `version` in [`package.json`](package.json).
 2. Set a GitHub token with `repo` scope once in your shell: `export GH_TOKEN=...` (Windows:
    `$env:GH_TOKEN="..."`). It stays on your machine and is never shipped.
-3. Run:
+3. (Optional) Set `SENTRY_DSN=...` to enable error monitoring in the build — see below.
+4. Run:
    ```bash
    npm run release
    ```
@@ -77,4 +78,12 @@ Installed apps check that repo's Releases on launch, download in the background,
   `%APPDATA%/…/anthropic.key.enc` and injected into the backend's `ANTHROPIC_API_KEY` at launch; it
   never leaves the machine. Changing it takes effect after a restart (the Settings window offers to
   restart). A shipped API key would be trivially extractable from the app bundle, so this is the only
-  safe pattern for a distributed client — see the note in the repo's desktop discussion.
+  safe pattern for a distributed client.
+- **Error monitoring (Sentry)** is optional and **off unless a DSN is baked in at build time**. Set
+  `SENTRY_DSN=...` when building/releasing (e.g. `SENTRY_DSN=… npm run release`); `scripts/stage.js`
+  writes it into `sentry.json` (gitignored) for the Electron shell + backend and compiles it into the
+  React bundle as `REACT_APP_SENTRY_DSN`. Unlike the Anthropic key, a Sentry **DSN is safe to embed** —
+  it only permits *sending* events, grants no access or spend — so it ships in the app. With no
+  `SENTRY_DSN`, all three surfaces (shell/`@sentry/electron`, backend/`@sentry/node`,
+  frontend/`@sentry/react`) initialize to a no-op. The build-machine-only Sentry **auth token** (for
+  source-map upload, if you add it later) stays in your shell like `GH_TOKEN`, never in the app.

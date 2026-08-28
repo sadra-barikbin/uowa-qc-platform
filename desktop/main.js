@@ -1,10 +1,23 @@
 const { app, BrowserWindow, dialog, utilityProcess, ipcMain, Menu, safeStorage } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const Sentry = require('@sentry/electron/main');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
+
+// Error monitoring. A Sentry DSN is safe to embed (it only permits SENDING events, grants no access
+// or spend), unlike the user's Anthropic key — so it ships in the app. It's baked in at build time
+// from SENTRY_DSN (scripts/stage.js writes sentry.json), or read from the env in dev. Disabled when
+// neither is set. This DSN is also handed to the backend child + the frontend build.
+function resolveSentryDsn() {
+    if (process.env.SENTRY_DSN) return process.env.SENTRY_DSN;
+    try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'sentry.json'), 'utf8')).dsn || ''; }
+    catch { return ''; }
+}
+const SENTRY_DSN = resolveSentryDsn();
+if (SENTRY_DSN) Sentry.init({ dsn: SENTRY_DSN, environment: app.isPackaged ? 'production' : 'development' });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The desktop app is a thin shell around the existing backend: it runs the
@@ -149,6 +162,8 @@ async function startBackend() {
     const apiKey = loadApiKey();
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
     log(`anthropic key configured=${apiKey ? 'yes' : 'no'}`);
+    // Hand the (embeddable) Sentry DSN to the backend so it reports its own errors too.
+    if (SENTRY_DSN) env.SENTRY_DSN = SENTRY_DSN;
 
     backendChild = utilityProcess.fork(serverEntry, [], { cwd: backendDir, stdio: 'pipe', env });
 
