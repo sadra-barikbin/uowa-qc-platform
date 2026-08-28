@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Settings — Anthropic API Key</title>
+    <style>
+        :root { --bg:#0f172a; --panel:#111c33; --text:#e2e8f0; --muted:#94a3b8; --blue:#1d4ed8; --gold:#fdbe34; --line:#243247; }
+        * { box-sizing: border-box; }
+        body { font-family: "Segoe UI", system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); padding: 22px; }
+        h1 { font-size: 17px; margin: 0 0 4px; }
+        p.help { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0 0 16px; }
+        label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+        .row { display: flex; gap: 8px; }
+        input[type=password], input[type=text] { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); padding: 10px 12px; font-size: 13px; font-family: ui-monospace, monospace; }
+        input:focus { outline: none; border-color: var(--blue); }
+        button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px;
+            padding: 10px 14px; font-size: 13px; cursor: pointer; }
+        button:hover { border-color: var(--blue); }
+        button.primary { background: var(--blue); border-color: var(--blue); }
+        button.ghost { background: transparent; }
+        button.link { border: none; background: none; color: var(--muted); padding: 6px; }
+        .toggle { width: 44px; }
+        .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+        .status { margin-top: 16px; font-size: 12.5px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+        .status.set { border-color: #14532d; color: #86efac; }
+        .status.warn { border-color: #7c2d12; color: #fdba74; }
+        .spacer { flex: 1; }
+    </style>
+</head>
+<body>
+    <h1>Anthropic API Key</h1>
+    <p class="help">
+        Used only for the optional AI grading feature. The key is stored <b>encrypted on this computer</b>
+        (Windows account protection) and never leaves it. Get a key from
+        console.anthropic.com → API Keys. Changes take effect after a restart.
+    </p>
+
+    <label for="key">API key</label>
+    <div class="row">
+        <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+        <button id="toggle" class="toggle ghost" title="Show / hide">👁</button>
+    </div>
+
+    <div class="actions">
+        <button id="save" class="primary">Save</button>
+        <button id="clear" class="ghost">Remove key</button>
+        <span class="spacer"></span>
+        <button id="close" class="link">Close</button>
+    </div>
+
+    <div id="status" class="status">Checking…</div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const statusEl = $('status');
+
+        async function refresh() {
+            const s = await window.apiKeyApi.status();
+            if (!s.encryptionAvailable) {
+                statusEl.className = 'status warn';
+                statusEl.textContent = 'Secure storage is unavailable on this system — the key cannot be stored safely, so saving is disabled.';
+                $('save').disabled = true;
+                return;
+            }
+            if (s.hasKey) {
+                statusEl.className = 'status set';
+                statusEl.textContent = 'A key is currently saved. Enter a new one to replace it, or remove it.';
+            } else {
+                statusEl.className = 'status';
+                statusEl.textContent = 'No key saved yet. AI grading is disabled until you add one.';
+            }
+        }
+
+        $('toggle').addEventListener('click', () => {
+            const el = $('key');
+            el.type = el.type === 'password' ? 'text' : 'password';
+        });
+
+        $('save').addEventListener('click', async () => {
+            const key = $('key').value.trim();
+            if (!key) { statusEl.className = 'status warn'; statusEl.textContent = 'Please enter an API key.'; return; }
+            try {
+                $('save').disabled = true;
+                await window.apiKeyApi.save(key);
+                $('key').value = '';
+                await refresh();
+            } catch (e) {
+                statusEl.className = 'status warn';
+                statusEl.textContent = (e && e.message) ? e.message : String(e);
+            } finally {
+                $('save').disabled = false;
+            }
+        });
+
+        $('clear').addEventListener('click', async () => {
+            await window.apiKeyApi.clear();
+            $('key').value = '';
+            await refresh();
+        });
+
+        $('close').addEventListener('click', () => window.close());
+
+        refresh();
+    </script>
+</body>
+</html>

@@ -71,5 +71,10 @@ Installed apps check that repo's Releases on launch, download in the background,
 - **App icon** is the University of Warith Al-Anbiya crest (`build/icon.ico`). It's generated from
   `frontend/public/uowa-logo-b.svg` by `npm run icon` (a committed artifact — a normal build doesn't
   re-run it). Re-run that script if the source logo changes.
-- **AI grading** works only if an `ANTHROPIC_API_KEY` is available to the backend; the app runs fully
-  without it. A future enhancement can expose a settings field storing the key in `config.json`.
+- **AI grading (Anthropic API key)** is optional; the app runs fully without it. The key is **never
+  shipped** — the user adds their own via **File → Settings — Anthropic API Key…**. It's encrypted at
+  rest with Electron `safeStorage` (Windows DPAPI, tied to that Windows account) in
+  `%APPDATA%/…/anthropic.key.enc` and injected into the backend's `ANTHROPIC_API_KEY` at launch; it
+  never leaves the machine. Changing it takes effect after a restart (the Settings window offers to
+  restart). A shipped API key would be trivially extractable from the app bundle, so this is the only
+  safe pattern for a distributed client — see the note in the repo's desktop discussion.
