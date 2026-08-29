@@ -39,7 +39,9 @@ Output lands in `desktop/dist/`:
 1. Bump `version` in [`package.json`](package.json).
 2. Set a GitHub token with `repo` scope once in your shell: `export GH_TOKEN=...` (Windows:
    `$env:GH_TOKEN="..."`). It stays on your machine and is never shipped.
-3. Run:
+3. (Optional) Set `SENTRY_DSN_BACKEND=...` and `SENTRY_DSN_FRONTEND=...` to enable error monitoring
+   in the build — see below.
+4. Run:
    ```bash
    npm run release
    ```
@@ -71,5 +73,24 @@ Installed apps check that repo's Releases on launch, download in the background,
 - **App icon** is the University of Warith Al-Anbiya crest (`build/icon.ico`). It's generated from
   `frontend/public/uowa-logo-b.svg` by `npm run icon` (a committed artifact — a normal build doesn't
   re-run it). Re-run that script if the source logo changes.
-- **AI grading** works only if an `ANTHROPIC_API_KEY` is available to the backend; the app runs fully
-  without it. A future enhancement can expose a settings field storing the key in `config.json`.
+- **AI grading (Anthropic API key)** is optional; the app runs fully without it. The key is **never
+  shipped** — the user adds their own via **File → Settings — Anthropic API Key…**. It's encrypted at
+  rest with Electron `safeStorage` (Windows DPAPI, tied to that Windows account) in
+  `%APPDATA%/…/anthropic.key.enc` and injected into the backend's `ANTHROPIC_API_KEY` at launch; it
+  never leaves the machine. Changing it takes effect after a restart (the Settings window offers to
+  restart). A shipped API key would be trivially extractable from the app bundle, so this is the only
+  safe pattern for a distributed client.
+- **Error monitoring (Sentry)** is optional and **off unless a DSN is baked in at build time**, using
+  **two Sentry projects** — one for the Node side, one for the browser side:
+  - `SENTRY_DSN_BACKEND` → the **backend** (`@sentry/node`) **and the Electron shell** (`@sentry/electron`),
+    since the shell is also a Node process. `scripts/stage.js` writes it into `sentry.json` (gitignored,
+    packed into the app); the shell reads it and passes it to the backend child as `SENTRY_DSN`.
+  - `SENTRY_DSN_FRONTEND` → the **frontend** (`@sentry/react`), compiled into the React bundle as
+    `REACT_APP_SENTRY_DSN`.
+
+  So a release looks like `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… GH_TOKEN=… npm run release`.
+  Unlike the Anthropic key, a Sentry **DSN is safe to embed** — it only permits *sending* events, grants
+  no access or spend — so it ships in the app. With neither var set, all three surfaces initialize to a
+  no-op. The build-machine-only
+  Sentry **auth token** (for source-map upload, if you add it later) stays in your shell like `GH_TOKEN`,
+  never in the app.

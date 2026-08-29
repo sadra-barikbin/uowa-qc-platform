@@ -1,4 +1,12 @@
 import 'dotenv/config';
+import * as Sentry from '@sentry/node';
+
+// Error monitoring. The DSN is injected by the desktop shell (SENTRY_DSN); when unset — normal dev
+// or self-hosted runs — Sentry stays disabled. Init before the app is built.
+if (process.env.SENTRY_DSN) {
+    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV, tracesSampleRate: 0 });
+}
+
 import 'express-async-errors';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -93,6 +101,8 @@ if (process.env.FRONTEND_DIR) {
 app.use((err: Error & { status?: number }, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);
     const status = err.status || 500;
+    // Report genuine server faults (5xx) to Sentry; skip expected 4xx validation/auth errors.
+    if (status >= 500 && process.env.SENTRY_DSN) Sentry.captureException(err);
     res.status(status).json({
         error: err.message || 'Internal Server Error',
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
