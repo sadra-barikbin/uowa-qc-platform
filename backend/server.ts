@@ -1,12 +1,9 @@
+// IMPORTANT: `./instrument` must be the first import so Sentry initializes
+// before Express (and everything else) loads and can auto-instrument it. It reads
+// SENTRY_DSN from the environment (injected by the desktop shell); unset = disabled.
+import './instrument';
 import 'dotenv/config';
 import * as Sentry from '@sentry/node';
-
-// Error monitoring. The DSN is injected by the desktop shell (SENTRY_DSN); when unset — normal dev
-// or self-hosted runs — Sentry stays disabled. Init before the app is built.
-if (process.env.SENTRY_DSN) {
-    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV, tracesSampleRate: 0 });
-}
-
 import 'express-async-errors';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -84,6 +81,14 @@ app.use('/api/settings',      settingsRoutes);
 // ── Health check ──────────────────────────────────────────────
 app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date() }));
 
+// ── Sentry test route (dev only) ──────────────────────────────
+// Hit GET /api/debug-sentry to confirm errors reach Sentry, then remove.
+if (process.env.NODE_ENV !== 'production') {
+    app.get('/api/debug-sentry', () => {
+        throw new Error('My first Sentry error!');
+    });
+}
+
 // ── Serve the built frontend (desktop app) ────────────────────
 // When FRONTEND_DIR is set, this process also serves the React build, so the whole app is one
 // local origin and the frontend's relative `/api` calls just work. Registered after all /api and
@@ -97,12 +102,16 @@ if (process.env.FRONTEND_DIR) {
     });
 }
 
+// ── Sentry error handler ──────────────────────────────────────
+// Registered after all controllers and before our own error middleware. Reports
+// genuine server faults (5xx by default) to Sentry with request context; expected
+// 4xx validation/auth errors are skipped.
+Sentry.setupExpressErrorHandler(app);
+
 // ── Global error handler ──────────────────────────────────────
 app.use((err: Error & { status?: number }, req: Request, res: Response, next: NextFunction) => {
     console.error(err.stack);
     const status = err.status || 500;
-    // Report genuine server faults (5xx) to Sentry; skip expected 4xx validation/auth errors.
-    if (status >= 500 && process.env.SENTRY_DSN) Sentry.captureException(err);
     res.status(status).json({
         error: err.message || 'Internal Server Error',
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),

@@ -1,0 +1,69 @@
+name: Sentry Release
+
+# Runs when you push a version tag (the "release" moment). It builds each app,
+# injects debug IDs, and uploads source maps to Sentry under a release named after
+# the tag — so stack traces are symbolicated before/when the release goes live.
+#
+# Trigger it with e.g.:
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# Required repo config (Settings → Secrets and variables → Actions):
+#   • Secret   SENTRY_AUTH_TOKEN        — Sentry auth token, scope: project:releases
+#   • Variable REACT_APP_SENTRY_DSN     — frontend project DSN (used to build the app)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Let a newer tag supersede an in-flight run for the same tag.
+concurrency:
+  group: sentry-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    name: backend source maps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so Sentry can associate commits if enabled
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Build & upload source maps
+        working-directory: backend
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_RELEASE: ${{ github.ref_name }} # the tag, e.g. v1.2.3
+        run: npm run release
+
+  frontend:
+    name: frontend source maps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build & upload source maps
+        working-directory: frontend
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_RELEASE: ${{ github.ref_name }}
+          # From repo Variable REACT_APP_SENTRY_DSN (Settings → Variables).
+          REACT_APP_SENTRY_DSN: ${{ vars.REACT_APP_SENTRY_DSN }}
+        run: npm run release

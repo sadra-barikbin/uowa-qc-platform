@@ -8,7 +8,9 @@
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "typecheck": "tsc --noEmit",
-    "seed": "ts-node utils/seedData.ts"
+    "seed": "ts-node utils/seedData.ts",
+    "sentry:sourcemaps": "node scripts/sentry-sourcemaps.js",
+    "release": "npm run build && npm run sentry:sourcemaps"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
@@ -36,6 +38,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@sentry/cli": "^3.7.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.25",
