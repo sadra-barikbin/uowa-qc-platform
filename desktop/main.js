@@ -8,11 +8,13 @@ const http = require('http');
 const crypto = require('crypto');
 
 // Error monitoring. A Sentry DSN is safe to embed (it only permits SENDING events, grants no access
-// or spend), unlike the user's Anthropic key — so it ships in the app. It's baked in at build time
-// from SENTRY_DSN (scripts/stage.js writes sentry.json), or read from the env in dev. Disabled when
-// neither is set. This DSN is also handed to the backend child + the frontend build.
+// or spend), unlike the user's Anthropic key — so it ships in the app. This is the BACKEND project's
+// DSN (the shell is a Node process, so it reports there alongside the backend); the frontend has its
+// own project baked into the React bundle. It's read from sentry.json (baked in at build time by
+// scripts/stage.js from SENTRY_DSN_BACKEND) or from SENTRY_DSN_BACKEND directly in `electron .` dev.
+// Disabled when neither is set. This DSN is also handed to the backend child (as SENTRY_DSN).
 function resolveSentryDsn() {
-    if (process.env.SENTRY_DSN) return process.env.SENTRY_DSN;
+    if (process.env.SENTRY_DSN_BACKEND) return process.env.SENTRY_DSN_BACKEND;
     try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'sentry.json'), 'utf8')).dsn || ''; }
     catch { return ''; }
 }
