@@ -72,35 +72,65 @@ async function documentBlocks(doc: SubmissionDocument): Promise<Anthropic.Conten
 
 interface CriterionResult {
     criterion_id: string;
-    score?: number;      // 0..1 — checklist (0/0.5/1) and percentage
+    score?: number;      // 0..1 — checklist (no clauses) and percentage
     met?: boolean;       // binary
+    checks?: boolean[];  // checklist with clauses — one boolean per clause, in order
     confidence: number;  // 0..1
     rationale: string;   // Arabic reasoning + citation
 }
 
-// Arabic description of the output the model must return for a given criterion type.
-function outputSpec(type: string): string {
-    if (type === 'binary') return 'ثنائي — أعِد met=true إذا كان المعيار مستوفى وإلا met=false';
-    if (type === 'checklist') return 'قائمة تحقق — أعِد score بإحدى القيم فقط: 0 (غير مستوفٍ) أو 0.5 (مستوفٍ جزئياً) أو 1 (مستوفٍ بالكامل)';
+// A checklist criterion may define config.checks (clause texts) + config.scoring_mode.
+function checklistClauses(c: IndicatorCriterion): string[] {
+    const checks = c.config?.checks;
+    return Array.isArray(checks) ? checks.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+}
+const checklistMode = (c: IndicatorCriterion): 'all' | 'fraction' => (c.config?.scoring_mode === 'all' ? 'all' : 'fraction');
+function scoreChecklistChecks(checks: boolean[], mode: 'all' | 'fraction'): number {
+    if (!checks.length) return 0;
+    return mode === 'all' ? (checks.every(Boolean) ? 1 : 0) : checks.filter(Boolean).length / checks.length;
+}
+
+// Arabic description of the output the model must return for a criterion.
+function outputSpec(c: IndicatorCriterion): string {
+    const t = c.criterion_type;
+    if (t === 'binary') return 'ثنائي — أعِد met=true إذا كان المعيار مستوفى وإلا met=false';
+    if (t === 'checklist') {
+        const clauses = checklistClauses(c);
+        if (clauses.length) {
+            return 'قائمة تحقق ذات بنود — قيّم كل بند مما يلي على حدة وأعِد checks كمصفوفة قيم منطقية (true/false) بنفس ترتيب البنود:\n'
+                + clauses.map((x, i) => `   ${i + 1}) ${x}`).join('\n');
+        }
+        return 'قائمة تحقق — أعِد score بإحدى القيم فقط: 0 (غير مستوفٍ) أو 0.5 (مستوفٍ جزئياً) أو 1 (مستوفٍ بالكامل)';
+    }
     return 'نسبة مئوية — أعِد score رقماً بين 0 و1 يعبّر عن نسبة الاستيفاء';
 }
 
 const snapChecklist = (v: number): number => [0, 0.5, 1].reduce((best, o) => (Math.abs(o - v) < Math.abs(best - v) ? o : best), 0);
 
-// Coerce the model's answer into the 0..1 score the criterion's type allows.
-function normalizeAiScore(type: string, r?: CriterionResult): number {
-    if (!r) return 0;
-    if (type === 'binary') {
-        if (typeof r.met === 'boolean') return r.met ? 1 : 0;
-        return r.score != null && Number(r.score) >= 0.5 ? 1 : 0; // fallback if the model returned a score
+// Coerce the model's answer into a 0..1 score plus any raw_values to persist (checklist checks).
+function normalizeAiResult(c: IndicatorCriterion, r?: CriterionResult): { score: number; rawValues: Record<string, unknown> } {
+    if (!r) return { score: 0, rawValues: {} };
+    const t = c.criterion_type;
+    if (t === 'binary') {
+        if (typeof r.met === 'boolean') return { score: r.met ? 1 : 0, rawValues: {} };
+        return { score: r.score != null && Number(r.score) >= 0.5 ? 1 : 0, rawValues: {} };
+    }
+    if (t === 'checklist') {
+        const clauses = checklistClauses(c);
+        if (clauses.length && Array.isArray(r.checks)) {
+            const checks = clauses.map((_, i) => !!r.checks![i]);
+            return { score: scoreChecklistChecks(checks, checklistMode(c)), rawValues: { checks } };
+        }
+        const s = Math.min(1, Math.max(0, Number(r.score ?? (r.met ? 1 : 0))));
+        return { score: snapChecklist(s), rawValues: {} };
     }
     const s = Math.min(1, Math.max(0, Number(r.score ?? (r.met ? 1 : 0))));
-    return type === 'checklist' ? snapChecklist(s) : s;
+    return { score: s, rawValues: {} };
 }
 
 export interface AiEvaluationResult {
     model: string;
-    evaluated: Array<{ criterion_id: string; name_ar: string; score: number; confidence: number; rationale: string }>;
+    evaluated: Array<{ criterion_id: string; name_ar: string; score: number; confidence: number; rationale: string; raw_values: Record<string, unknown> }>;
     skipped: Array<{ criterion_id: string; name_ar: string; reason: string }>;
 }
 
@@ -171,7 +201,7 @@ export async function aiEvaluateIndicator(
         gradable.push(c);
         const guidance = (c.config?.ai_guidance as string | undefined)
             || `قيّم مدى استيفاء المعيار «${c.name_ar}» بالاعتماد على المستندات المرفقة.`;
-        content.push({ type: 'text', text: `— المعيار (criterion_id: ${c.id}): ${c.name_ar}\nنوع التقييم: ${outputSpec(c.criterion_type)}\nتعليمات التقييم: ${guidance}\nالمستندات التالية تخص هذا المعيار:` });
+        content.push({ type: 'text', text: `— المعيار (criterion_id: ${c.id}): ${c.name_ar}\nنوع التقييم: ${outputSpec(c)}\nتعليمات التقييم: ${guidance}\nالمستندات التالية تخص هذا المعيار:` });
         content.push(...blocks);
     }
 
@@ -182,9 +212,10 @@ export async function aiEvaluateIndicator(
     content.push({
         type: 'text',
         text: 'قيّم كل معيار مما سبق على حدة اعتماداً على مستنداته ووفق «نوع التقييم» المحدد له: '
-            + 'للمعيار الثنائي أعِد met (true/false)، ولمعيار قائمة التحقق أعِد score بإحدى القيم 0 أو 0.5 أو 1، '
-            + 'ولمعيار النسبة المئوية أعِد score رقماً بين 0 و1. وأعِد لكل معيار درجة ثقة confidence بين 0 و1 '
-            + 'وتبريراً موجزاً بالعربية يذكر اسم الملف والدليل. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
+            + 'للمعيار الثنائي أعِد met (true/false)؛ ولمعيار قائمة التحقق ذي البنود أعِد checks (قيمة منطقية لكل بند بالترتيب)؛ '
+            + 'ولمعيار قائمة التحقق بلا بنود أعِد score بإحدى القيم 0 أو 0.5 أو 1؛ ولمعيار النسبة المئوية أعِد score بين 0 و1. '
+            + 'وأعِد لكل معيار درجة ثقة confidence بين 0 و1 وتبريراً موجزاً بالعربية يذكر اسم الملف والدليل. '
+            + 'استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
     });
 
     // Bound the call: a normal grading request runs well under a minute, so a 2-min ceiling
@@ -210,7 +241,8 @@ export async function aiEvaluateIndicator(
                                 properties: {
                                     criterion_id: { type: 'string' },
                                     met: { type: 'boolean', description: 'binary criteria only: true if satisfied, false otherwise' },
-                                    score: { type: 'number', description: '0..1 — checklist (use 0, 0.5, or 1) and percentage criteria' },
+                                    score: { type: 'number', description: '0..1 — checklist without clauses (use 0, 0.5, or 1) and percentage criteria' },
+                                    checks: { type: 'array', items: { type: 'boolean' }, description: 'checklist criteria that list clauses: one boolean per clause, in the given order' },
                                     confidence: { type: 'number', description: '0..1' },
                                     rationale: { type: 'string' },
                                 },
@@ -241,7 +273,7 @@ export async function aiEvaluateIndicator(
     const evaluated: AiEvaluationResult['evaluated'] = [];
     for (const c of gradable) {
         const r = byId[c.id];
-        const score = normalizeAiScore(c.criterion_type, r);
+        const { score, rawValues } = normalizeAiResult(c, r);
         const confidence = r && r.confidence != null ? Math.min(1, Math.max(0, Number(r.confidence))) : null;
         const rationale = r?.rationale || 'لم يُرجِع النموذج نتيجة لهذا المعيار.';
         const submission = subByCriterion[c.id];
@@ -250,18 +282,18 @@ export async function aiEvaluateIndicator(
             where: { period_id, department_id, criterion_id: c.id },
             defaults: {
                 period_id, department_id, criterion_id: c.id, submission_id: submission?.id ?? null,
-                score, reviewer_notes: rationale, evaluation_method: 'ai',
+                score, raw_values: rawValues, reviewer_notes: rationale, evaluation_method: 'ai',
                 ai_confidence: confidence, ai_rationale: rationale, evaluated_by: evaluatedBy, evaluated_at: new Date(),
             },
         });
         if (!created) {
             await evaluation.update({
-                submission_id: submission?.id ?? null, score, reviewer_notes: rationale, evaluation_method: 'ai',
+                submission_id: submission?.id ?? null, score, raw_values: rawValues, reviewer_notes: rationale, evaluation_method: 'ai',
                 ai_confidence: confidence, ai_rationale: rationale, evaluated_by: evaluatedBy, evaluated_at: new Date(),
             });
         }
         if (submission) await submission.update({ status: 'reviewed' });
-        evaluated.push({ criterion_id: c.id, name_ar: c.name_ar, score, confidence: confidence ?? 0, rationale });
+        evaluated.push({ criterion_id: c.id, name_ar: c.name_ar, score, confidence: confidence ?? 0, rationale, raw_values: rawValues });
     }
 
     return { model: MODEL, evaluated, skipped };

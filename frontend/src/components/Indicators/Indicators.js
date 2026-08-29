@@ -3,11 +3,19 @@ import toast from 'react-hot-toast';
 import { indicatorsAPI } from '../../utils/api';
 
 const TYPE_LABEL = { binary: 'ثنائي (نعم/لا)', checklist: 'قائمة تحقق', percentage: 'نسبة مئوية', ratio: 'نسبة (بسط/مقام)' };
-const emptyCriterion = () => ({ name_ar: '', criterion_type: 'checklist', weight: 1, ai_guidance: '' });
+const emptyCriterion = () => ({ name_ar: '', criterion_type: 'checklist', weight: 1, ai_guidance: '', checks: [], scoring_mode: 'fraction' });
 const GUIDANCE_PLACEHOLDER = 'تعليمات التقييم الآلي (اختياري) — صف ما يجب أن يبحث عنه المُقيِّم الآلي في المستندات ومتى يمنح الدرجة الكاملة';
 
-// Turn a criterion's flat ai_guidance field into the config payload the API stores.
-const toConfig = (c) => (c.ai_guidance && c.ai_guidance.trim() ? { ai_guidance: c.ai_guidance.trim() } : {});
+// Turn a criterion's flat form fields into the config payload the API stores.
+const toConfig = (c) => {
+    const cfg = {};
+    if (c.ai_guidance && c.ai_guidance.trim()) cfg.ai_guidance = c.ai_guidance.trim();
+    if (c.criterion_type === 'checklist') {
+        const checks = (c.checks || []).map(s => (s || '').trim()).filter(Boolean);
+        if (checks.length) { cfg.checks = checks; cfg.scoring_mode = c.scoring_mode === 'all' ? 'all' : 'fraction'; }
+    }
+    return cfg;
+};
 
 export default function Indicators() {
     const [indicators, setIndicators] = useState([]);
@@ -61,7 +69,7 @@ export default function Indicators() {
         } catch (err) { toast.error(err.response?.data?.error || 'خطأ'); }
     };
 
-    const startEditCriterion = (c) => { setEditingCriterion(c.id); setEditValues({ name_ar: c.name_ar, criterion_type: c.criterion_type, weight: Number(c.weight), ai_guidance: c.config?.ai_guidance || '' }); };
+    const startEditCriterion = (c) => { setEditingCriterion(c.id); setEditValues({ name_ar: c.name_ar, criterion_type: c.criterion_type, weight: Number(c.weight), ai_guidance: c.config?.ai_guidance || '', checks: Array.isArray(c.config?.checks) ? c.config.checks : [], scoring_mode: c.config?.scoring_mode === 'all' ? 'all' : 'fraction' }); };
     const cancelEditCriterion = () => { setEditingCriterion(null); setEditValues(null); };
     const saveEditCriterion = async () => {
         if (!editValues.name_ar) { toast.error('اسم المعيار مطلوب'); return; }
@@ -84,7 +92,30 @@ export default function Indicators() {
                 <input type="number" step="0.1" className="form-input" placeholder="الوزن" value={c.weight} onChange={e => patch({ weight: Number(e.target.value) })} />
                 {onRemove && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={onRemove} disabled={removeDisabled}>حذف</button>}
             </div>
-            <textarea className="form-textarea" style={{ fontSize: 12, minHeight: 58, marginTop: 8 }} placeholder={GUIDANCE_PLACEHOLDER} value={c.ai_guidance} onChange={e => patch({ ai_guidance: e.target.value })} />
+            {c.criterion_type === 'checklist' && (() => {
+                const checks = Array.isArray(c.checks) ? c.checks : [];
+                const setChecks = next => patch({ checks: next });
+                return (
+                    <div style={{ marginTop: 8, padding: '10px 12px', background: 'var(--gray-50)', border: '1px solid var(--gray-200)', borderRadius: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--gray-600)', marginBottom: 8 }}>بنود قائمة التحقق (اختياري)</div>
+                        {checks.map((item, i) => (
+                            <div key={i} className="flex items-center gap-2" style={{ marginBottom: 6 }}>
+                                <input className="form-input" style={{ fontSize: 13 }} placeholder={`البند ${i + 1}`} value={item} onChange={e => setChecks(checks.map((x, idx) => (idx === i ? e.target.value : x)))} />
+                                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setChecks(checks.filter((_, idx) => idx !== i))}>حذف</button>
+                            </div>
+                        ))}
+                        <button className="btn btn-ghost btn-sm" onClick={() => setChecks([...checks, ''])}>+ إضافة بند</button>
+                        {checks.length > 0 && (
+                            <div className="flex items-center gap-3" style={{ marginTop: 10, fontSize: 12, flexWrap: 'wrap' }}>
+                                <span style={{ color: 'var(--gray-500)' }}>طريقة الاحتساب:</span>
+                                <label style={{ cursor: 'pointer' }}><input type="radio" checked={(c.scoring_mode || 'fraction') === 'fraction'} onChange={() => patch({ scoring_mode: 'fraction' })} /> النسبة (المُحقَّق ÷ الكل)</label>
+                                <label style={{ cursor: 'pointer' }}><input type="radio" checked={c.scoring_mode === 'all'} onChange={() => patch({ scoring_mode: 'all' })} /> الكل مطلوب</label>
+                            </div>
+                        )}
+                        <p style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 8 }}>اترك البنود فارغة لاستخدام التقييم البسيط (مستوفٍ / جزئي / غير مستوفٍ).</p>
+                    </div>
+                );
+            })()}
         </>
     );
 
