@@ -18,24 +18,29 @@ const resourcesDir = path.join(desktopDir, 'resources');
 const stagedBackend = path.join(resourcesDir, 'backend');
 const stagedFrontend = path.join(resourcesDir, 'frontend');
 
-// Sentry DSN is baked in from the environment at build/release time — never committed. It's safe to
-// embed (a DSN only permits sending events). Provide it via `SENTRY_DSN=… npm run release`.
-const sentryDsn = process.env.SENTRY_DSN || '';
+// Two Sentry projects — one for the backend/shell (Node) and one for the frontend (React) — so each
+// DSN goes to its own project. Baked in from the environment at build/release time, never committed;
+// both are safe to embed (a DSN only permits sending events). Provide them via
+// `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… npm run release` (SENTRY_DSN is accepted as a
+// backwards-compatible alias for the backend one).
+const backendSentryDsn = process.env.SENTRY_DSN_BACKEND || process.env.SENTRY_DSN || '';
+const frontendSentryDsn = process.env.SENTRY_DSN_FRONTEND || '';
 
 const run = (cmd, cwd) => {
     console.log(`\n$ ${cmd}   (in ${path.relative(rootDir, cwd) || '.'})`);
     execSync(cmd, {
         cwd,
         stdio: 'inherit',
-        // REACT_APP_SENTRY_DSN is compiled into the React bundle so the frontend can report errors.
-        env: { ...process.env, CI: '1', GENERATE_SOURCEMAP: 'false', REACT_APP_SENTRY_DSN: sentryDsn },
+        // REACT_APP_SENTRY_DSN is compiled into the React bundle so the frontend reports to its own project.
+        env: { ...process.env, CI: '1', GENERATE_SOURCEMAP: 'false', REACT_APP_SENTRY_DSN: frontendSentryDsn },
     });
 };
 
-// 0. Bake the DSN for the Electron shell + backend to read at runtime (packed into the app by
-//    electron-builder `files`). Empty when no DSN was provided — Sentry then stays disabled.
-fs.writeFileSync(path.join(desktopDir, 'sentry.json'), JSON.stringify({ dsn: sentryDsn }, null, 2));
-console.log(`\nSentry DSN ${sentryDsn ? 'baked in' : 'not set — monitoring disabled'}`);
+// 0. Bake the backend/shell DSN for the Electron shell + backend child to read at runtime (packed
+//    into the app by electron-builder `files`). Empty when not provided — Sentry then stays disabled.
+fs.writeFileSync(path.join(desktopDir, 'sentry.json'), JSON.stringify({ dsn: backendSentryDsn }, null, 2));
+console.log(`\nSentry backend/shell DSN ${backendSentryDsn ? 'baked in' : 'not set'}; ` +
+    `frontend DSN ${frontendSentryDsn ? 'baked in' : 'not set'}`);
 
 // 1. Compile the backend (TypeScript -> dist/) and build the frontend.
 run('npm run build', backendDir);
