@@ -1,4 +1,5 @@
 import React from 'react';
+import * as Sentry from '@sentry/react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -50,11 +51,13 @@ function AppRoutes() {
 
 export default function App() {
     return (
-        <AuthProvider>
-            <BrowserRouter>
-                <AppRoutes />
-                <Toaster position="top-center" toastOptions={{ duration: 3500, style: { borderRadius: '10px', fontSize: '14px' } }} />
-            </BrowserRouter>
-        </AuthProvider>
+        <Sentry.ErrorBoundary fallback={<div className="page-loader">حدث خطأ غير متوقع.</div>}>
+            <AuthProvider>
+                <BrowserRouter>
+                    <AppRoutes />
+                    <Toaster position="top-center" toastOptions={{ duration: 3500, style: { borderRadius: '10px', fontSize: '14px' } }} />
+                </BrowserRouter>
+            </AuthProvider>
+        </Sentry.ErrorBoundary>
     );
 }

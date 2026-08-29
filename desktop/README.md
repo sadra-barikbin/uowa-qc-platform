@@ -39,8 +39,8 @@ Output lands in `desktop/dist/`:
 1. Bump `version` in [`package.json`](package.json).
 2. Set a GitHub token with `repo` scope once in your shell: `export GH_TOKEN=...` (Windows:
    `$env:GH_TOKEN="..."`). It stays on your machine and is never shipped.
-3. (Optional) Set `SENTRY_DSN_BACKEND=...` and `SENTRY_DSN_FRONTEND=...` to enable error monitoring
-   in the build — see below.
+3. (Optional) Set `SENTRY_DSN_BACKEND=...`, `SENTRY_DSN_FRONTEND=...` (error monitoring) and
+   `SENTRY_AUTH_TOKEN=...` (source-map upload) — see below.
 4. Run:
    ```bash
    npm run release
@@ -88,9 +88,14 @@ Installed apps check that repo's Releases on launch, download in the background,
   - `SENTRY_DSN_FRONTEND` → the **frontend** (`@sentry/react`), compiled into the React bundle as
     `REACT_APP_SENTRY_DSN`.
 
-  So a release looks like `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… GH_TOKEN=… npm run release`.
+  **Source maps** are uploaded automatically when `SENTRY_AUTH_TOKEN` is set (scope `project:releases`):
+  `scripts/stage.js` builds with source maps, injects debug IDs, uploads them to each project under the
+  **app `version`** as the release (matching what the running app reports — the shell tags events with
+  `app.getVersion()`), then strips the `.map` files from the shipped bundle. Without the token the upload
+  is skipped and no maps ship. The auth token is a build-machine secret — keep it in your shell like
+  `GH_TOKEN`, never in the app.
+
+  So a full release looks like
+  `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… SENTRY_AUTH_TOKEN=… GH_TOKEN=… npm run release`.
   Unlike the Anthropic key, a Sentry **DSN is safe to embed** — it only permits *sending* events, grants
-  no access or spend — so it ships in the app. With neither var set, all three surfaces initialize to a
-  no-op. The build-machine-only
-  Sentry **auth token** (for source-map upload, if you add it later) stays in your shell like `GH_TOKEN`,
-  never in the app.
+  no access or spend — so it ships in the app. With no DSN set, all three surfaces initialize to a no-op.

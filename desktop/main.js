@@ -19,7 +19,7 @@ function resolveSentryDsn() {
     catch { return ''; }
 }
 const SENTRY_DSN = resolveSentryDsn();
-if (SENTRY_DSN) Sentry.init({ dsn: SENTRY_DSN, environment: app.isPackaged ? 'production' : 'development' });
+if (SENTRY_DSN) Sentry.init({ dsn: SENTRY_DSN, environment: app.isPackaged ? 'production' : 'development', release: app.getVersion() });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The desktop app is a thin shell around the existing backend: it runs the
@@ -166,8 +166,11 @@ async function startBackend() {
     const apiKey = loadApiKey();
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
     log(`anthropic key configured=${apiKey ? 'yes' : 'no'}`);
-    // Hand the (embeddable) Sentry DSN to the backend so it reports its own errors too.
+    // Hand the (embeddable) Sentry DSN to the backend so it reports its own errors too, and tag its
+    // events with the packaged app version so backend releases line up automatically — no
+    // deploy-time env var needed.
     if (SENTRY_DSN) env.SENTRY_DSN = SENTRY_DSN;
+    env.SENTRY_RELEASE = app.getVersion();
 
     backendChild = utilityProcess.fork(serverEntry, [], { cwd: backendDir, stdio: 'pipe', env });
 

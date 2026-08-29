@@ -1,0 +1,81 @@
+name: Desktop Release
+
+# Builds the Windows desktop installer, uploads source maps to Sentry (keyed off the
+# app version — desktop/package.json `version`), and publishes the installer + latest.yml
+# to a GitHub Release, all via `desktop/ npm run release` (scripts/stage.js + electron-builder).
+#
+# Trigger by pushing a version tag that matches desktop/package.json's version:
+#   (bump desktop/package.json version) → git tag v1.0.1 && git push origin v1.0.1
+# or run it manually from the Actions tab (workflow_dispatch).
+#
+# Required repo config (Settings → Secrets and variables → Actions):
+#   • Secret   SENTRY_AUTH_TOKEN    — scope: project:releases (enables source-map upload)
+#   • Variable SENTRY_DSN_BACKEND   — backend/shell Sentry DSN (safe to expose)
+#   • Variable SENTRY_DSN_FRONTEND  — frontend Sentry DSN (safe to expose)
+# (If you stored the two DSNs as Secrets instead of Variables, change `vars.` to `secrets.` below.)
+# GH_TOKEN uses the built-in GITHUB_TOKEN — no PAT needed.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# electron-builder publishes the installer to a GitHub Release on this repo.
+permissions:
+  contents: write
+
+# Don't let two releases build at once.
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # The target is a Windows NSIS installer, so this must run on Windows.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      # On a tag push, the release name comes from desktop/package.json's version, not the tag —
+      # so fail fast (before any build/publish) if they disagree. Skipped for manual dispatch.
+      - name: Verify tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"                                   # v1.0.1 -> 1.0.1
+          version="$(node -p "require('./desktop/package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag v$tag does not match desktop/package.json version $version"
+            exit 1
+          fi
+          echo "Tag matches version $version"
+
+      # stage.js builds backend + frontend and runs their sentry:sourcemaps scripts,
+      # so all three packages need their dependencies installed.
+      - name: Install dependencies
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+          npm ci --prefix desktop
+
+      - name: Build, upload source maps, and publish
+        working-directory: desktop
+        env:
+          # Source-map upload (skipped automatically if the token is absent).
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          # DSNs baked into the app so it reports errors (safe to expose).
+          SENTRY_DSN_BACKEND: ${{ vars.SENTRY_DSN_BACKEND }}
+          SENTRY_DSN_FRONTEND: ${{ vars.SENTRY_DSN_FRONTEND }}
+          # electron-builder publishes the release using the built-in token.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release

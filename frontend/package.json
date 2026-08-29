@@ -17,7 +17,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "sentry:sourcemaps": "node scripts/sentry-sourcemaps.js"
   },
   "browserslist": {
     "production": [
@@ -29,5 +30,8 @@
       "last 1 chrome version",
       "last 1 firefox version"
     ]
+  },
+  "devDependencies": {
+    "@sentry/cli": "^3.7.0"
   }
 }
