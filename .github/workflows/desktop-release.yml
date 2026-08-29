@@ -46,6 +46,20 @@ jobs:
             frontend/package-lock.json
             desktop/package-lock.json
 
+      # On a tag push, the release name comes from desktop/package.json's version, not the tag —
+      # so fail fast (before any build/publish) if they disagree. Skipped for manual dispatch.
+      - name: Verify tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"                                   # v1.0.1 -> 1.0.1
+          version="$(node -p "require('./desktop/package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag v$tag does not match desktop/package.json version $version"
+            exit 1
+          fi
+          echo "Tag matches version $version"
+
       # stage.js builds backend + frontend and runs their sentry:sourcemaps scripts,
       # so all three packages need their dependencies installed.
       - name: Install dependencies
