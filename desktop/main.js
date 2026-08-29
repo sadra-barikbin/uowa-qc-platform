@@ -144,7 +144,9 @@ async function startBackend() {
 
     const env = {
         ...process.env,
-        NODE_ENV: 'production',
+        // Match the shell: a packaged install runs the backend as production; `electron .` dev runs it
+        // as development (dev SQL logging, error stacks in responses, correct Sentry environment tag).
+        NODE_ENV: app.isPackaged ? 'production' : 'development',
         PGLITE_DIR: pgDir,
         PGLITE_PORT: String(pgPort),
         // The backend connects to PGlite through the ordinary Postgres client; on localhost
