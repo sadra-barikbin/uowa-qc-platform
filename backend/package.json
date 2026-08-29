@@ -9,8 +9,7 @@
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "typecheck": "tsc --noEmit",
     "seed": "ts-node utils/seedData.ts",
-    "sentry:sourcemaps": "node scripts/sentry-sourcemaps.js",
-    "release": "npm run build && npm run sentry:sourcemaps"
+    "sentry:sourcemaps": "node scripts/sentry-sourcemaps.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

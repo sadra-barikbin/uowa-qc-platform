@@ -18,7 +18,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
-    "release": "node scripts/release.js"
+    "sentry:sourcemaps": "node scripts/sentry-sourcemaps.js"
   },
   "browserslist": {
     "production": [
