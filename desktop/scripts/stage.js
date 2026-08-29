@@ -21,9 +21,8 @@ const stagedFrontend = path.join(resourcesDir, 'frontend');
 // Two Sentry projects — one for the backend/shell (Node) and one for the frontend (React) — so each
 // DSN goes to its own project. Baked in from the environment at build/release time, never committed;
 // both are safe to embed (a DSN only permits sending events). Provide them via
-// `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… npm run release` (SENTRY_DSN is accepted as a
-// backwards-compatible alias for the backend one).
-const backendSentryDsn = process.env.SENTRY_DSN_BACKEND || process.env.SENTRY_DSN || '';
+// `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… npm run release`.
+const backendSentryDsn = process.env.SENTRY_DSN_BACKEND || '';
 const frontendSentryDsn = process.env.SENTRY_DSN_FRONTEND || '';
 
 const run = (cmd, cwd) => {

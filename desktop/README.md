@@ -88,9 +88,9 @@ Installed apps check that repo's Releases on launch, download in the background,
   - `SENTRY_DSN_FRONTEND` → the **frontend** (`@sentry/react`), compiled into the React bundle as
     `REACT_APP_SENTRY_DSN`.
 
-  So a release looks like `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… GH_TOKEN=… npm run release`
-  (bare `SENTRY_DSN` is still accepted as an alias for the backend one). Unlike the Anthropic key, a
-  Sentry **DSN is safe to embed** — it only permits *sending* events, grants no access or spend — so it
-  ships in the app. With neither var set, all three surfaces initialize to a no-op. The build-machine-only
+  So a release looks like `SENTRY_DSN_BACKEND=… SENTRY_DSN_FRONTEND=… GH_TOKEN=… npm run release`.
+  Unlike the Anthropic key, a Sentry **DSN is safe to embed** — it only permits *sending* events, grants
+  no access or spend — so it ships in the app. With neither var set, all three surfaces initialize to a
+  no-op. The build-machine-only
   Sentry **auth token** (for source-map upload, if you add it later) stays in your shell like `GH_TOKEN`,
   never in the app.
