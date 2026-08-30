@@ -75,6 +75,7 @@ interface CriterionResult {
     score?: number;      // 0..1 — checklist (no clauses) and percentage
     met?: boolean;       // binary
     checks?: boolean[];  // checklist with clauses — one boolean per clause, in order
+    numerator?: number;  // ratio — the count found in the documents (denominator is human-entered)
     confidence: number;  // 0..1
     rationale: string;   // Arabic reasoning + citation
 }
@@ -102,6 +103,7 @@ function outputSpec(c: IndicatorCriterion): string {
         }
         return 'قائمة تحقق — أعِد score بإحدى القيم فقط: 0 (غير مستوفٍ) أو 0.5 (مستوفٍ جزئياً) أو 1 (مستوفٍ بالكامل)';
     }
+    if (t === 'ratio') return 'نسبة (بسط/مقام) — أعِد numerator: عدداً صحيحاً يمثل ما أمكن التحقق منه فعلياً في المستندات (البسط فقط). لا تُقدّر المقام فهو يُدخله المُقيِّم يدوياً.';
     return 'نسبة مئوية — أعِد score رقماً بين 0 و1 يعبّر عن نسبة الاستيفاء';
 }
 
@@ -131,6 +133,8 @@ function normalizeAiResult(c: IndicatorCriterion, r?: CriterionResult): { score:
 export interface AiEvaluationResult {
     model: string;
     evaluated: Array<{ criterion_id: string; name_ar: string; score: number; confidence: number; rationale: string; raw_values: Record<string, unknown> }>;
+    // ratio criteria: an AI-counted numerator the reviewer combines with a human-entered denominator
+    suggested: Array<{ criterion_id: string; name_ar: string; numerator: number; rationale: string }>;
     skipped: Array<{ criterion_id: string; name_ar: string; reason: string }>;
 }
 
@@ -184,14 +188,10 @@ export async function aiEvaluateIndicator(
     // instructions live in the system prompt above).
     const content: Anthropic.ContentBlockParam[] = [];
     const gradable: IndicatorCriterion[] = [];
+    const suggested: AiEvaluationResult['suggested'] = [];
     const skipped: AiEvaluationResult['skipped'] = [];
 
     for (const c of criteria) {
-        // ratio criteria mix an AI count with a human-supplied denominator → entered manually
-        if (c.criterion_type === 'ratio') {
-            skipped.push({ criterion_id: c.id, name_ar: c.name_ar, reason: 'معيار نسبة — يُدخَل يدوياً' });
-            continue;
-        }
         const docs = subByCriterion[c.id]?.documents || [];
         const blocks = (await Promise.all(docs.map(documentBlocks))).flat();
         if (blocks.length === 0) {
@@ -206,14 +206,15 @@ export async function aiEvaluateIndicator(
     }
 
     if (gradable.length === 0) {
-        return { model: MODEL, evaluated: [], skipped };
+        return { model: MODEL, evaluated: [], suggested, skipped };
     }
 
     content.push({
         type: 'text',
         text: 'قيّم كل معيار مما سبق على حدة اعتماداً على مستنداته ووفق «نوع التقييم» المحدد له: '
             + 'للمعيار الثنائي أعِد met (true/false)؛ ولمعيار قائمة التحقق ذي البنود أعِد checks (قيمة منطقية لكل بند بالترتيب)؛ '
-            + 'ولمعيار قائمة التحقق بلا بنود أعِد score بإحدى القيم 0 أو 0.5 أو 1؛ ولمعيار النسبة المئوية أعِد score بين 0 و1. '
+            + 'ولمعيار قائمة التحقق بلا بنود أعِد score بإحدى القيم 0 أو 0.5 أو 1؛ ولمعيار النسبة المئوية أعِد score بين 0 و1؛ '
+            + 'ولمعيار النسبة (بسط/مقام) أعِد numerator (البسط) عدداً صحيحاً دون تقدير المقام. '
             + 'وأعِد لكل معيار درجة ثقة confidence بين 0 و1 وتبريراً موجزاً بالعربية يذكر اسم الملف والدليل. '
             + 'استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
     });
@@ -243,6 +244,7 @@ export async function aiEvaluateIndicator(
                                     met: { type: 'boolean', description: 'binary criteria only: true if satisfied, false otherwise' },
                                     score: { type: 'number', description: '0..1 — checklist without clauses (use 0, 0.5, or 1) and percentage criteria' },
                                     checks: { type: 'array', items: { type: 'boolean' }, description: 'checklist criteria that list clauses: one boolean per clause, in the given order' },
+                                    numerator: { type: 'number', description: 'ratio criteria only: the integer count found in the documents (the denominator is entered by a human)' },
                                     confidence: { type: 'number', description: '0..1' },
                                     rationale: { type: 'string' },
                                 },
@@ -273,9 +275,17 @@ export async function aiEvaluateIndicator(
     const evaluated: AiEvaluationResult['evaluated'] = [];
     for (const c of gradable) {
         const r = byId[c.id];
+        const rationale = r?.rationale || 'لم يُرجِع النموذج نتيجة لهذا المعيار.';
+
+        // ratio: the model only supplies the numerator — the reviewer adds the denominator and
+        // saves, so we return it as a suggestion rather than writing a (scored) evaluation.
+        if (c.criterion_type === 'ratio') {
+            suggested.push({ criterion_id: c.id, name_ar: c.name_ar, numerator: Math.max(0, Math.round(Number(r?.numerator ?? 0))), rationale });
+            continue;
+        }
+
         const { score, rawValues } = normalizeAiResult(c, r);
         const confidence = r && r.confidence != null ? Math.min(1, Math.max(0, Number(r.confidence))) : null;
-        const rationale = r?.rationale || 'لم يُرجِع النموذج نتيجة لهذا المعيار.';
         const submission = subByCriterion[c.id];
 
         const [evaluation, created] = await Evaluation.findOrCreate({
@@ -296,5 +306,5 @@ export async function aiEvaluateIndicator(
         evaluated.push({ criterion_id: c.id, name_ar: c.name_ar, score, confidence: confidence ?? 0, rationale, raw_values: rawValues });
     }
 
-    return { model: MODEL, evaluated, skipped };
+    return { model: MODEL, evaluated, suggested, skipped };
 }

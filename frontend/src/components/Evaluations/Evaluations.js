@@ -233,15 +233,27 @@ export default function Evaluations() {
         } finally { setAcceptingAll(false); }
     };
 
+    // ratio criteria: the AI only counts the numerator — drop it into the input as a suggestion
+    // (flagged) for the reviewer to combine with a human-entered denominator, then save.
+    const applySuggested = (suggested) => {
+        if (!suggested?.length) return;
+        setRowState(prev => {
+            const next = { ...prev };
+            suggested.forEach(s => { next[s.criterion_id] = { ...next[s.criterion_id], numerator: s.numerator, aiNumerator: true }; });
+            return next;
+        });
+    };
+
     const runAi = async (indicatorId) => {
         setAiId(indicatorId);
         try {
             const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: indicatorId });
-            const { evaluated = [], skipped = [] } = r.data;
+            const { evaluated = [], suggested = [], skipped = [] } = r.data;
             const updates = {};
             evaluated.forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
             patchEvaluations(updates);
-            toast.success(`تقييم آلي: ${evaluated.length} معيار${skipped.length ? ` (تُخطّي ${skipped.length} بلا مستندات)` : ''}`);
+            applySuggested(suggested);
+            toast.success(`تقييم آلي: ${evaluated.length} معيار${suggested.length ? ` + ${suggested.length} نسبة (أدخل المقام)` : ''}${skipped.length ? ` · تُخطّي ${skipped.length}` : ''}`);
         } catch (err) { toast.error(err.response?.data?.error || 'خطأ في التقييم الآلي'); }
         finally { setAiId(null); }
     };
@@ -251,16 +263,20 @@ export default function Evaluations() {
         setRunningAll(true);
         const ids = matrix.map(g => g.indicator.id);
         const t = toast.loading(`التقييم الآلي: 0/${ids.length}`);
-        let done = 0; const updates = {};
+        let done = 0; const updates = {}; const allSuggested = [];
         try {
             for (const id of ids) {
-                try { const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: id }); (r.data.evaluated || []).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); }); }
-                catch { /* keep going; one indicator failing shouldn't abort the batch */ }
+                try {
+                    const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: id });
+                    (r.data.evaluated || []).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
+                    (r.data.suggested || []).forEach(s => allSuggested.push(s));
+                } catch { /* keep going; one indicator failing shouldn't abort the batch */ }
                 done++;
                 toast.loading(`التقييم الآلي: ${done}/${ids.length}`, { id: t });
             }
             patchEvaluations(updates);
-            toast.success(`اكتمل التقييم الآلي — ${Object.keys(updates).length} معياراً`, { id: t });
+            applySuggested(allSuggested);
+            toast.success(`اكتمل التقييم الآلي — ${Object.keys(updates).length} معياراً${allSuggested.length ? ` + ${allSuggested.length} نسبة (أدخل المقام)` : ''}`, { id: t });
         } finally { setRunningAll(false); }
     };
 
@@ -286,14 +302,15 @@ export default function Evaluations() {
             return (
                 <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
                     <div>
-                        <label className="form-hint">{criterion.config?.numerator_label_ar || 'البسط'}</label>
-                        <input type="number" className="form-input" style={{ width: 100 }} value={state.numerator} onChange={e => updateRow(criterion.id, { numerator: e.target.value })} />
+                        <label className="form-hint">{criterion.config?.numerator_label_ar || 'البسط'}{state.aiNumerator ? ' 🤖' : ''}</label>
+                        <input type="number" className="form-input" style={{ width: 100, ...(state.aiNumerator ? { borderColor: '#1a56db', background: '#eef2ff' } : {}) }} value={state.numerator} onChange={e => updateRow(criterion.id, { numerator: e.target.value })} />
                     </div>
                     <div>
                         <label className="form-hint">{criterion.config?.denominator_label_ar || 'المقام'}</label>
                         <input type="number" className="form-input" style={{ width: 100 }} value={state.denominator} onChange={e => updateRow(criterion.id, { denominator: e.target.value })} />
                     </div>
                     {preview != null && <span style={{ fontSize: 13, fontWeight: 600, color: scoreColor(preview) }}>= {preview}%</span>}
+                    {state.aiNumerator && den <= 0 && <span style={{ fontSize: 12, color: '#1a56db' }}>البسط مُقترَح آلياً — أدخل المقام</span>}
                 </div>
             );
         }
