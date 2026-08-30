@@ -39,7 +39,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 ships npm 11 — matching the npm that generated the committed lock files.
+          # (npm 10, from Node 20, rejects an npm-11 lock with "Missing … from lock file".)
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -62,7 +64,11 @@ jobs:
 
       # stage.js builds backend + frontend and runs their sentry:sourcemaps scripts,
       # so all three packages need their dependencies installed.
+      # shell: bash runs with `set -eo pipefail`, so a failing install fails the step immediately —
+      # unlike the default Windows pwsh, which only checks the LAST command's exit code and would
+      # silently swallow an earlier `npm ci` failure.
       - name: Install dependencies
+        shell: bash
         run: |
           npm ci --prefix backend
           npm ci --prefix frontend
