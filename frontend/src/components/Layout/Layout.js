@@ -73,13 +73,13 @@ export default function Layout() {
                     ))}
                 </nav>
                 <div className="sidebar-footer">
-                    <div className="sidebar-user" onClick={() => { logout(); navigate('/login'); }}>
+                    <div className="sidebar-user">
                         <div className="avatar">{initials(user?.full_name_ar || user?.full_name)}</div>
                         <div className="sidebar-user-info">
                             <div className="sidebar-user-name truncate">{user?.full_name_ar || user?.full_name}</div>
                             <div className="sidebar-user-role">{ROLE_LABELS[user?.role]}</div>
                         </div>
-                        <span style={{ color: 'var(--gray-400)', fontSize: 13 }}>خروج</span>
+                        <button type="button" className="sidebar-logout" onClick={() => { logout(); navigate('/login'); }}>خروج</button>
                     </div>
                     {version && <div className="sidebar-version">الإصدار {version}</div>}
                 </div>
