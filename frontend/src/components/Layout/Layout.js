@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { notificationsAPI } from '../../utils/api';
+import { notificationsAPI, systemAPI } from '../../utils/api';
 
 const ROLE_LABELS = { admin: 'وحدة ضمان الجودة', qc_head: 'رئيس قسم الجودة', dept_rep: 'ممثل القسم', viewer: 'مشاهد' };
 const NAV = [
@@ -35,6 +35,7 @@ export default function Layout() {
     const navigate = useNavigate();
     const [unread, setUnread] = useState(0);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [version, setVersion] = useState('');
     const pageTitle = PAGE_TITLES[location.pathname] || 'نظام متابعة الأداء';
 
     useEffect(() => {
@@ -42,6 +43,10 @@ export default function Layout() {
         const iv = setInterval(() => notificationsAPI.list().then(r => setUnread(r.data.unread_count)).catch(() => {}), 60000);
         return () => clearInterval(iv);
     }, [location.pathname]);
+
+    useEffect(() => {
+        systemAPI.health().then(r => setVersion(r.data.version || '')).catch(() => {});
+    }, []);
 
     const initials = (name) => name?.split(' ').slice(0, 2).map(w => w[0]).join('') || '?';
 
@@ -76,6 +81,7 @@ export default function Layout() {
                         </div>
                         <span style={{ color: 'var(--gray-400)', fontSize: 13 }}>خروج</span>
                     </div>
+                    {version && <div className="sidebar-version">الإصدار {version}</div>}
                 </div>
             </aside>
             <div className="main-content">

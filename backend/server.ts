@@ -79,7 +79,17 @@ app.use('/api/dashboard',     dashboardRoutes);
 app.use('/api/settings',      settingsRoutes);
 
 // ── Health check ──────────────────────────────────────────────
-app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date() }));
+// `version` is the packaged desktop app version when running under the Electron shell (it sets
+// APP_VERSION), otherwise the backend's own package.json version — the frontend shows it in the
+// sidebar. __dirname is backend/ under ts-node (dev) and backend/dist/ once compiled, so try both.
+function appVersion(): string {
+    if (process.env.APP_VERSION) return process.env.APP_VERSION;
+    for (const p of [path.join(__dirname, 'package.json'), path.join(__dirname, '..', 'package.json')]) {
+        try { return require(p).version as string; } catch { /* try next */ }
+    }
+    return 'dev';
+}
+app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', version: appVersion(), timestamp: new Date() }));
 
 // ── Sentry test route (dev only) ──────────────────────────────
 // Hit GET /api/debug-sentry to confirm errors reach Sentry, then remove.

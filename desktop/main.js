@@ -160,6 +160,8 @@ async function startBackend() {
         FRONTEND_DIR: frontendDir,
         PORT: String(appPort),
         JWT_SECRET: cfg.jwtSecret,
+        // Surface the packaged app version to the backend so /api/health (and thus the UI) reports it.
+        APP_VERSION: app.getVersion(),
     };
     // Provide the (user-supplied, locally-encrypted) Anthropic key only if one is stored. When
     // absent, AI grading simply errors when used — the rest of the app is unaffected.
