@@ -6,6 +6,17 @@ const fs = require('fs');
 const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
+
+// `electron . --dev-live` runs a hot-reloading dev loop instead of the staged production bundle:
+// the backend runs through ts-node-dev (no `tsc`) and the frontend through the CRA dev server
+// (HMR, no `react-scripts build`), so neither needs a rebuild between edits. The real desktop
+// behaviours (embedded PGlite DB, the File→API-key menu) are preserved. Only meaningful unpackaged.
+const DEV_LIVE = !app.isPackaged && process.argv.includes('--dev-live');
+const DEV_BACKEND_PORT = 5000;   // fixed ports in dev-live so they're predictable and match .env
+const DEV_FRONTEND_PORT = 3001;
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+let frontendChild = null;
 
 // Error monitoring. A Sentry DSN is safe to embed (it only permits SENDING events, grants no access
 // or spend), unlike the user's Anthropic key — so it ships in the app. This is the BACKEND project's
@@ -57,6 +68,7 @@ const backendDir = app.isPackaged
 const frontendDir = app.isPackaged
     ? path.join(process.resourcesPath, 'frontend')
     : path.join(__dirname, '..', 'frontend', 'build');
+const frontendSrcDir = path.join(__dirname, '..', 'frontend'); // dev-live: run the CRA dev server here
 const serverEntry = path.join(backendDir, 'dist', 'server.js');
 
 // A stable per-install secret for signing JWTs, generated once and persisted.
@@ -129,16 +141,70 @@ function waitForHealth(port, timeoutMs = 180000) {
     });
 }
 
+// Resolve once the dev server at `port` answers on `/` at all (any status) — the CRA dev server's
+// first compile takes a while, so we poll like waitForHealth rather than assume it's instant.
+function waitForHttp(port, timeoutMs = 180000) {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise((resolve, reject) => {
+        const tryOnce = () => {
+            const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: 2000 }, (res) => {
+                res.resume();
+                resolve();
+            });
+            req.on('error', retry);
+            req.on('timeout', () => { req.destroy(); retry(); });
+        };
+        const retry = () => {
+            if (Date.now() > deadline) return reject(new Error('frontend dev server did not start in time'));
+            setTimeout(tryOnce, 500);
+        };
+        tryOnce();
+    });
+}
+
+// Kill a spawned child and its whole process tree. On Windows a child launched via npm.cmd is the
+// root of a tree (npm → node → ts-node-dev/react-scripts); a plain kill() leaves the grandchildren
+// running, so use taskkill /T to take the whole tree down.
+function killTree(child) {
+    if (!child || child.killed) return;
+    try {
+        if (process.platform === 'win32' && child.pid) {
+            spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+            child.kill();
+        }
+    } catch { /* already gone */ }
+}
+
+// dev-live only: run the CRA dev server (HMR) pointed at the backend's API port. Returns the port
+// the window should load. BROWSER=none stops CRA opening a system browser tab.
+function startFrontendDev(apiPort) {
+    const env = {
+        ...process.env,
+        PORT: String(DEV_FRONTEND_PORT),
+        BROWSER: 'none',
+        REACT_APP_API_URL: `http://localhost:${apiPort}/api`,
+    };
+    log(`starting CRA dev server on :${DEV_FRONTEND_PORT} (api → :${apiPort})`);
+    frontendChild = spawn(npmCmd, ['start'], { cwd: frontendSrcDir, env, shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    frontendChild.stdout?.on('data', (d) => log(`[frontend] ${String(d).trimEnd()}`));
+    frontendChild.stderr?.on('data', (d) => log(`[frontend:err] ${String(d).trimEnd()}`));
+    frontendChild.on('error', (err) => log(`[frontend] spawn error: ${err.message}`));
+    frontendChild.on('exit', (code) => { log(`frontend dev server exited code=${code}`); frontendChild = null; });
+    return DEV_FRONTEND_PORT;
+}
+
 async function startBackend() {
     const cfg = loadConfig();
-    const appPort = await getFreePort();
+    const appPort = DEV_LIVE ? DEV_BACKEND_PORT : await getFreePort();
     const pgPort = await getFreePort();
 
     log(`backendDir=${backendDir}`);
     log(`serverEntry=${serverEntry} exists=${fs.existsSync(serverEntry)}`);
     log(`frontendDir=${frontendDir} exists=${fs.existsSync(frontendDir)}`);
-    log(`appPort=${appPort} pgPort=${pgPort} pgDir=${pgDir}`);
-    if (!fs.existsSync(serverEntry)) {
+    log(`appPort=${appPort} pgPort=${pgPort} pgDir=${pgDir} devLive=${DEV_LIVE}`);
+    // dev-live compiles on the fly via ts-node-dev, so there's no dist/server.js to check for.
+    if (!DEV_LIVE && !fs.existsSync(serverEntry)) {
         throw new Error(`Backend not found at ${serverEntry}`);
     }
 
@@ -157,12 +223,19 @@ async function startBackend() {
         DB_USER: 'postgres',
         DB_PASSWORD: 'postgres',
         UPLOAD_DIR: uploadsDir,
-        FRONTEND_DIR: frontendDir,
         PORT: String(appPort),
         JWT_SECRET: cfg.jwtSecret,
         // Surface the packaged app version to the backend so /api/health (and thus the UI) reports it.
         APP_VERSION: app.getVersion(),
     };
+    if (DEV_LIVE) {
+        // The CRA dev server (a separate origin) serves the frontend, so the backend must not also
+        // serve a build, and must allow the CRA origin through CORS.
+        env.FRONTEND_URL = `http://localhost:${DEV_FRONTEND_PORT}`;
+    } else {
+        // Packaged/staged: the backend serves the built SPA from this same origin.
+        env.FRONTEND_DIR = frontendDir;
+    }
     // Provide the (user-supplied, locally-encrypted) Anthropic key only if one is stored. When
     // absent, AI grading simply errors when used — the rest of the app is unaffected.
     const apiKey = loadApiKey();
@@ -174,14 +247,22 @@ async function startBackend() {
     if (SENTRY_DSN) env.SENTRY_DSN = SENTRY_DSN;
     env.SENTRY_RELEASE = app.getVersion();
 
-    backendChild = utilityProcess.fork(serverEntry, [], { cwd: backendDir, stdio: 'pipe', env });
+    if (DEV_LIVE) {
+        // Hot-reloading backend (ts-node-dev via `npm run dev`) — recompiles on save, no `tsc` step.
+        backendChild = spawn(npmCmd, ['run', 'dev'], { cwd: backendDir, env, shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+        backendChild.on('error', (err) => log(`[backend] spawn error: ${err.message}`));
+    } else {
+        backendChild = utilityProcess.fork(serverEntry, [], { cwd: backendDir, stdio: 'pipe', env });
+    }
 
     backendChild.stdout?.on('data', (d) => log(`[backend] ${String(d).trimEnd()}`));
     backendChild.stderr?.on('data', (d) => log(`[backend:err] ${String(d).trimEnd()}`));
     backendChild.on('exit', (code) => {
         log(`backend exited code=${code}`);
         backendChild = null;
-        if (code !== 0 && !app.isQuitting) {
+        // In dev-live, ts-node-dev owns respawning on save; a crash there shouldn't tear down the
+        // whole session (fix the code and it recompiles). Only the packaged path treats it as fatal.
+        if (!DEV_LIVE && code !== 0 && !app.isQuitting) {
             dialog.showErrorBox('QC Platform', `The application backend stopped unexpectedly (code ${code}).\n\nDetails were written to:\n${logPath}`);
             app.quit();
         }
@@ -195,9 +276,12 @@ async function startBackend() {
 
 function stopBackend() {
     if (backendChild) {
-        try { backendChild.kill(); } catch { /* already gone */ }
+        // dev-live spawns npm (a process tree); the packaged path uses utilityProcess (a single
+        // process that kill() handles directly).
+        if (DEV_LIVE) killTree(backendChild); else { try { backendChild.kill(); } catch { /* already gone */ } }
         backendChild = null;
     }
+    if (frontendChild) { killTree(frontendChild); frontendChild = null; }
 }
 
 function createWindow() {
@@ -315,9 +399,18 @@ if (!app.requestSingleInstanceLock()) {
         buildMenu();
         createWindow();
         try {
-            const port = await startBackend();
-            log(`loading app at http://localhost:${port}`);
-            if (mainWindow) mainWindow.loadURL(`http://localhost:${port}`);
+            const apiPort = await startBackend();
+            // dev-live: the window loads the CRA dev server (HMR); the backend it just started serves
+            // only the API. Otherwise the backend serves both, so the window loads the backend port.
+            let loadPort = apiPort;
+            if (DEV_LIVE) {
+                loadPort = startFrontendDev(apiPort);
+                log('waiting for CRA dev server…');
+                await waitForHttp(loadPort);
+                log('frontend dev server ready');
+            }
+            log(`loading app at http://localhost:${loadPort}`);
+            if (mainWindow) mainWindow.loadURL(`http://localhost:${loadPort}`);
             checkForUpdates();
         } catch (err) {
             log(`STARTUP FAILED: ${err && err.stack || err}`);
