@@ -314,7 +314,7 @@ function openSettingsWindow() {
     settingsWindow = new BrowserWindow({
         width: 560,
         height: 420,
-        title: 'Settings — Anthropic API Key',
+        title: 'الإعدادات — مفتاح Anthropic API',
         parent: mainWindow || undefined,
         modal: !!mainWindow,
         resizable: false,
@@ -338,15 +338,15 @@ ipcMain.handle('apikey:status', () => ({
 }));
 ipcMain.handle('apikey:save', async (_e, key) => {
     const trimmed = String(key || '').trim();
-    if (!trimmed) throw new Error('Please enter an API key.');
+    if (!trimmed) throw new Error('الرجاء إدخال مفتاح API.');
     saveApiKey(trimmed);
     log('anthropic key saved');
     const { response } = await dialog.showMessageBox(settingsWindow, {
         type: 'info',
-        buttons: ['Restart now', 'Later'],
+        buttons: ['أعد التشغيل الآن', 'لاحقاً'],
         defaultId: 0,
-        title: 'API key saved',
-        message: 'The API key was saved securely. Restart the app to enable AI grading?',
+        title: 'تم حفظ المفتاح',
+        message: 'تم حفظ مفتاح API بأمان. هل تريد إعادة تشغيل التطبيق لتفعيل التقييم الآلي؟',
     });
     if (response === 0) { app.isQuitting = true; stopBackend(); app.relaunch(); app.exit(0); }
     return { ok: true };
@@ -356,15 +356,21 @@ ipcMain.handle('apikey:clear', () => { clearApiKey(); log('anthropic key cleared
 function buildMenu() {
     const template = [
         {
-            label: 'File',
+            label: 'ملف',
             submenu: [
-                { label: 'Settings — Anthropic API Key…', click: openSettingsWindow },
+                { label: 'الإعدادات — مفتاح Anthropic API…', click: openSettingsWindow },
                 { type: 'separator' },
-                { role: 'quit' },
+                { role: 'quit', label: 'خروج' },
             ],
         },
-        { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-        { label: 'View', submenu: [{ role: 'reload' }, { role: 'togglefullscreen' }, ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }])] },
+        { label: 'تحرير', submenu: [
+            { role: 'undo', label: 'تراجع' }, { role: 'redo', label: 'إعادة' }, { type: 'separator' },
+            { role: 'cut', label: 'قص' }, { role: 'copy', label: 'نسخ' }, { role: 'paste', label: 'لصق' }, { role: 'selectAll', label: 'تحديد الكل' },
+        ] },
+        { label: 'عرض', submenu: [
+            { role: 'reload', label: 'إعادة تحميل' }, { role: 'togglefullscreen', label: 'ملء الشاشة' },
+            ...(app.isPackaged ? [] : [{ role: 'toggleDevTools', label: 'أدوات المطور' }]),
+        ] },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
