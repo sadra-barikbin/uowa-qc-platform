@@ -14,9 +14,18 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         res.status(401).json({ error: 'No token provided' });
         return;
     }
+    const token = header.split(' ')[1];
+    let payload: JwtPayload;
     try {
-        const token = header.split(' ')[1];
-        const payload = jwt.verify(token, process.env.JWT_SECRET || 'supersecret') as JwtPayload;
+        payload = jwt.verify(token, process.env.JWT_SECRET || 'supersecret') as JwtPayload;
+    } catch {
+        // Only a genuinely bad/expired token is a 401. Anything past this point is a server-side
+        // failure (e.g. a transient DB connection error) and must NOT be reported as an auth
+        // failure, or the frontend interceptor logs the user out on the next hiccup.
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+    }
+    try {
         const user = await User.findByPk(payload.id, { attributes: { exclude: ['password'] } });
         if (!user || !user.is_active) {
             res.status(401).json({ error: 'User not found or inactive' });
@@ -24,8 +33,8 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         }
         req.user = user;
         next();
-    } catch {
-        res.status(401).json({ error: 'Invalid token' });
+    } catch (err) {
+        next(err);
     }
 };
 
