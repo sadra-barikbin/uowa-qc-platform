@@ -24,7 +24,7 @@ export default function Login() {
     const fill = (email, password) => setForm({ email, password });
 
     return (
-        <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#1a56db', padding:20 }}>
+        <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'linear-gradient(160deg, #f4f7ff 0%, #e6eeff 55%, #d7e4ff 100%)', padding:20 }}>
             <div style={{ background:'#fff', borderRadius:16, padding:'40px 36px', width:'100%', maxWidth:420, boxShadow:'0 20px 60px rgba(0,0,0,.2)' }}>
                 <div style={{ textAlign:'center', marginBottom:32 }}>
                     <img src="/uowa-logo-b.svg" alt="شعار جامعة وارث الأنبياء" style={{ height:80, margin:'0 auto 16px', display:'block' }} />
