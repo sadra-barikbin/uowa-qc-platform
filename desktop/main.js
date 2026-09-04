@@ -346,7 +346,10 @@ ipcMain.handle('apikey:save', async (_e, key) => {
         buttons: ['أعد التشغيل الآن', 'لاحقاً'],
         defaultId: 0,
         title: 'تم حفظ المفتاح',
-        message: 'تم حفظ مفتاح API بأمان. هل تريد إعادة تشغيل التطبيق لتفعيل التقييم الآلي؟',
+        // Keep this pure Arabic (no embedded Latin like "API"): the native task dialog renders with
+        // an LTR base direction, so a Latin run mid-sentence splits the Arabic into two runs that get
+        // reordered (garbled). Single-run Arabic renders correctly.
+        message: 'تم حفظ المفتاح بأمان. هل تريد إعادة تشغيل التطبيق لتفعيل التقييم الآلي؟',
     });
     if (response === 0) { app.isQuitting = true; stopBackend(); app.relaunch(); app.exit(0); }
     return { ok: true };
