@@ -6,6 +6,23 @@ import { departmentsAPI, periodsAPI, submissionsAPI, evaluationsAPI } from '../.
 const scoreColor = s => s >= 90 ? '#0e9f6e' : s >= 70 ? '#1a56db' : s >= 50 ? '#c27803' : '#e02424';
 const LOW_CONF = 0.8; // AI scores under this confidence are flagged for a closer look
 
+// Checklist criteria may define config.checks (clause texts) + config.scoring_mode.
+const clausesOf = (criterion) => (Array.isArray(criterion?.config?.checks) ? criterion.config.checks.filter(x => typeof x === 'string' && x.trim() !== '') : []);
+const isClauseChecklist = (criterion) => criterion?.criterion_type === 'checklist' && clausesOf(criterion).length > 0;
+const checklistScore = (criterion, checks) => {
+    const arr = clausesOf(criterion).map((_, i) => !!checks?.[i]);
+    if (!arr.length) return 0;
+    return (criterion?.config?.scoring_mode === 'all') ? (arr.every(Boolean) ? 1 : 0) : arr.filter(Boolean).length / arr.length;
+};
+// Build one criterion's row-state (score inputs) from its stored evaluation.
+const initRow = (criterion, evaluation) => ({
+    percent: evaluation?.score != null ? Math.round(Number(evaluation.score) * 100) : '',
+    numerator: evaluation?.raw_values?.numerator ?? '',
+    denominator: evaluation?.raw_values?.denominator ?? '',
+    notes: evaluation?.reviewer_notes || '',
+    checks: clausesOf(criterion).map((_, i) => !!evaluation?.raw_values?.checks?.[i]),
+});
+
 function formatSize(bytes) {
     if (!bytes) return '';
     if (bytes < 1024) return `${bytes} B`;
@@ -84,12 +101,7 @@ export default function Evaluations() {
                 setMatrix(m);
                 const rs = {};
                 m.forEach(group => group.criteria.forEach(({ criterion, evaluation }) => {
-                    rs[criterion.id] = {
-                        percent: evaluation?.score != null ? Math.round(Number(evaluation.score) * 100) : '',
-                        numerator: evaluation?.raw_values?.numerator ?? '',
-                        denominator: evaluation?.raw_values?.denominator ?? '',
-                        notes: evaluation?.reviewer_notes || '',
-                    };
+                    rs[criterion.id] = initRow(criterion, evaluation);
                 }));
                 setRowState(rs);
                 setExpanded({}); // all indicators collapsed by default; the index + filters drive navigation
@@ -106,16 +118,24 @@ export default function Evaluations() {
     const rowComplete = (criterion) => {
         const st = rowState[criterion.id] || {};
         const filled = v => v !== '' && v != null;
-        return criterion.criterion_type === 'ratio' ? filled(st.numerator) && filled(st.denominator) : filled(st.percent);
+        if (criterion.criterion_type === 'ratio') return filled(st.numerator) && filled(st.denominator);
+        if (isClauseChecklist(criterion)) return true; // checkboxes always have a definite state
+        return filled(st.percent);
     };
 
     // Whether the row's inputs differ from the stored evaluation (nothing to save otherwise).
     const rowDirty = (criterion, evaluation) => {
         const st = rowState[criterion.id] || {};
+        if (!evaluation) return true; // never evaluated → allow the first save
         if (String(st.notes || '') !== String(evaluation?.reviewer_notes || '')) return true;
         if (criterion.criterion_type === 'ratio') {
             return String(st.numerator ?? '') !== String(evaluation?.raw_values?.numerator ?? '')
                 || String(st.denominator ?? '') !== String(evaluation?.raw_values?.denominator ?? '');
+        }
+        if (isClauseChecklist(criterion)) {
+            const cur = clausesOf(criterion).map((_, i) => !!(st.checks || [])[i]);
+            const stored = clausesOf(criterion).map((_, i) => !!evaluation?.raw_values?.checks?.[i]);
+            return JSON.stringify(cur) !== JSON.stringify(stored);
         }
         const storedPercent = evaluation?.score != null ? Math.round(Number(evaluation.score) * 100) : '';
         return String(st.percent ?? '') !== String(storedPercent);
@@ -130,19 +150,15 @@ export default function Evaluations() {
         })));
         setRowState(prev => {
             const next = { ...prev };
-            Object.entries(updates).forEach(([cid, ev]) => {
-                next[cid] = {
-                    percent: ev?.score != null ? Math.round(Number(ev.score) * 100) : '',
-                    numerator: ev?.raw_values?.numerator ?? '',
-                    denominator: ev?.raw_values?.denominator ?? '',
-                    notes: ev?.reviewer_notes || '',
-                };
-            });
+            // rebuild row-state from the updated evaluation, using each criterion's clause config
+            matrix.forEach(g => g.criteria.forEach(item => {
+                if (updates[item.criterion.id]) next[item.criterion.id] = initRow(item.criterion, updates[item.criterion.id]);
+            }));
             return next;
         });
     };
     // Shape an /ai result row into an evaluation object for patchEvaluations.
-    const aiEvalToEvaluation = e => ({ score: e.score, evaluation_method: 'ai', ai_confidence: e.confidence, ai_rationale: e.rationale, reviewer_notes: e.rationale, raw_values: {} });
+    const aiEvalToEvaluation = e => ({ score: e.score, evaluation_method: 'ai', ai_confidence: e.confidence, ai_rationale: e.rationale, reviewer_notes: e.rationale, raw_values: e.raw_values || {} });
 
     const saveRow = async (criterion, submissionId) => {
         const state = rowState[criterion.id] || {};
@@ -150,9 +166,13 @@ export default function Evaluations() {
         if (criterion.criterion_type === 'ratio') {
             if (state.numerator === '' || state.denominator === '') { toast.error('أدخل البسط والمقام'); return; }
             payload.raw_values = { numerator: Number(state.numerator), denominator: Number(state.denominator) };
+        } else if (isClauseChecklist(criterion)) {
+            const checks = clausesOf(criterion).map((_, i) => !!(state.checks || [])[i]);
+            payload.score = checklistScore(criterion, checks);
+            payload.raw_values = { checks };
         } else {
             if (state.percent === '') { toast.error('أدخل التقييم'); return; }
-            payload.score = Number(state.percent) / 100; // binary / checklist / percentage → 0-1 fraction
+            payload.score = Number(state.percent) / 100; // binary / percentage → 0-1 fraction
         }
         setSavingId(criterion.id);
         try {
@@ -169,7 +189,10 @@ export default function Evaluations() {
     const aiAcceptPayload = (criterion, evaluation, submissionId) => {
         const p = { period_id: selPeriod, department_id: selDept, criterion_id: criterion.id, submission_id: submissionId, reviewer_notes: evaluation.reviewer_notes || undefined };
         if (criterion.criterion_type === 'ratio') p.raw_values = evaluation.raw_values || {};
-        else p.score = Number(evaluation.score); // binary / checklist / percentage are 0-1
+        else {
+            p.score = Number(evaluation.score); // binary / checklist / percentage are 0-1
+            if (isClauseChecklist(criterion) && Array.isArray(evaluation.raw_values?.checks)) p.raw_values = { checks: evaluation.raw_values.checks };
+        }
         return p; // no evaluation_method → stored as 'manual'
     };
 
@@ -210,15 +233,27 @@ export default function Evaluations() {
         } finally { setAcceptingAll(false); }
     };
 
+    // ratio criteria: the AI only counts the numerator — drop it into the input as a suggestion
+    // (flagged) for the reviewer to combine with a human-entered denominator, then save.
+    const applySuggested = (suggested) => {
+        if (!suggested?.length) return;
+        setRowState(prev => {
+            const next = { ...prev };
+            suggested.forEach(s => { next[s.criterion_id] = { ...next[s.criterion_id], numerator: s.numerator, aiNumerator: true }; });
+            return next;
+        });
+    };
+
     const runAi = async (indicatorId) => {
         setAiId(indicatorId);
         try {
             const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: indicatorId });
-            const { evaluated = [], skipped = [] } = r.data;
+            const { evaluated = [], suggested = [], skipped = [] } = r.data;
             const updates = {};
             evaluated.forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
             patchEvaluations(updates);
-            toast.success(`تقييم آلي: ${evaluated.length} معيار${skipped.length ? ` (تُخطّي ${skipped.length} بلا مستندات)` : ''}`);
+            applySuggested(suggested);
+            toast.success(`تقييم آلي: ${evaluated.length} معيار${suggested.length ? ` + ${suggested.length} نسبة (أدخل المقام)` : ''}${skipped.length ? ` · تُخطّي ${skipped.length}` : ''}`);
         } catch (err) { toast.error(err.response?.data?.error || 'خطأ في التقييم الآلي'); }
         finally { setAiId(null); }
     };
@@ -228,16 +263,20 @@ export default function Evaluations() {
         setRunningAll(true);
         const ids = matrix.map(g => g.indicator.id);
         const t = toast.loading(`التقييم الآلي: 0/${ids.length}`);
-        let done = 0; const updates = {};
+        let done = 0; const updates = {}; const allSuggested = [];
         try {
             for (const id of ids) {
-                try { const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: id }); (r.data.evaluated || []).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); }); }
-                catch { /* keep going; one indicator failing shouldn't abort the batch */ }
+                try {
+                    const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: id });
+                    (r.data.evaluated || []).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
+                    (r.data.suggested || []).forEach(s => allSuggested.push(s));
+                } catch { /* keep going; one indicator failing shouldn't abort the batch */ }
                 done++;
                 toast.loading(`التقييم الآلي: ${done}/${ids.length}`, { id: t });
             }
             patchEvaluations(updates);
-            toast.success(`اكتمل التقييم الآلي — ${Object.keys(updates).length} معياراً`, { id: t });
+            applySuggested(allSuggested);
+            toast.success(`اكتمل التقييم الآلي — ${Object.keys(updates).length} معياراً${allSuggested.length ? ` + ${allSuggested.length} نسبة (أدخل المقام)` : ''}`, { id: t });
         } finally { setRunningAll(false); }
     };
 
@@ -263,14 +302,15 @@ export default function Evaluations() {
             return (
                 <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
                     <div>
-                        <label className="form-hint">{criterion.config?.numerator_label_ar || 'البسط'}</label>
-                        <input type="number" className="form-input" style={{ width: 100 }} value={state.numerator} onChange={e => updateRow(criterion.id, { numerator: e.target.value })} />
+                        <label className="form-hint">{criterion.config?.numerator_label_ar || 'البسط'}{state.aiNumerator ? ' 🤖' : ''}</label>
+                        <input type="number" className="form-input" style={{ width: 100, ...(state.aiNumerator ? { borderColor: '#1a56db', background: '#eef2ff' } : {}) }} value={state.numerator} onChange={e => updateRow(criterion.id, { numerator: e.target.value })} />
                     </div>
                     <div>
                         <label className="form-hint">{criterion.config?.denominator_label_ar || 'المقام'}</label>
                         <input type="number" className="form-input" style={{ width: 100 }} value={state.denominator} onChange={e => updateRow(criterion.id, { denominator: e.target.value })} />
                     </div>
                     {preview != null && <span style={{ fontSize: 13, fontWeight: 600, color: scoreColor(preview) }}>= {preview}%</span>}
+                    {state.aiNumerator && den <= 0 && <span style={{ fontSize: 12, color: '#1a56db' }}>البسط مُقترَح آلياً — أدخل المقام</span>}
                 </div>
             );
         }
@@ -284,6 +324,26 @@ export default function Evaluations() {
             );
         }
         if (criterion.criterion_type === 'checklist') {
+            const clauses = clausesOf(criterion);
+            if (clauses.length) {
+                const checks = state.checks || [];
+                const mode = criterion.config?.scoring_mode === 'all' ? 'all' : 'fraction';
+                const met = clauses.filter((_, i) => checks[i]).length;
+                const pct = Math.round(checklistScore(criterion, checks) * 100);
+                return (
+                    <div style={{ display: 'grid', gap: 4 }}>
+                        {clauses.map((clause, i) => (
+                            <label key={i} className="flex items-center gap-2" style={{ fontSize: 13, cursor: 'pointer' }}>
+                                <input type="checkbox" checked={!!checks[i]} onChange={e => updateRow(criterion.id, { checks: clauses.map((_, idx) => (idx === i ? e.target.checked : !!checks[idx])) })} />
+                                <span>{clause}</span>
+                            </label>
+                        ))}
+                        <span style={{ fontSize: 12, fontWeight: 600, color: scoreColor(pct) }}>
+                            {met}/{clauses.length} — {pct}%{mode === 'all' ? ' (الكل مطلوب)' : ''}
+                        </span>
+                    </div>
+                );
+            }
             return (
                 <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}>
                     <option value="">لم يُقيَّم</option>
