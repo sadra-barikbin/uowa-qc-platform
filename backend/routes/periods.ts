@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { InferCreationAttributes } from 'sequelize';
 import { EvaluationPeriod, PeriodIndicator, Indicator, IndicatorCriterion } from '../models';
 import { authenticate, authorize } from '../middleware/auth';
 
@@ -30,7 +31,9 @@ router.post('/', authenticate, authorize('admin'), async (req: Request, res: Res
     if (!year || !month) return res.status(400).json({ error: 'year and month are required' });
 
     const period = await EvaluationPeriod.create({
-        year, month, label_en, label_ar, submission_deadline, created_by: req.user!.id,
+        // An empty deadline from the form arrives as '' — coerce to null so Postgres doesn't
+        // get "Invalid date" for the timestamp column.
+        year, month, label_en, label_ar, submission_deadline: submission_deadline || null, created_by: req.user!.id,
     });
 
     if (clone_from_period_id) {
@@ -52,8 +55,16 @@ router.post('/', authenticate, authorize('admin'), async (req: Request, res: Res
 router.put('/:id', authenticate, authorize('admin'), async (req: Request, res: Response) => {
     const period = await EvaluationPeriod.findByPk(req.params.id);
     if (!period) return res.status(404).json({ error: 'Period not found' });
+    // Only touch fields actually present in the body: some callers send a status-only update
+    // (e.g. changing the period's status), and unconditionally writing the others would wipe
+    // them. An empty deadline ('') is normalised to null to avoid an invalid-timestamp error.
     const { label_en, label_ar, submission_deadline, status } = req.body;
-    await period.update({ label_en, label_ar, submission_deadline, status });
+    const updates: Partial<InferCreationAttributes<EvaluationPeriod>> = {};
+    if (label_en !== undefined) updates.label_en = label_en;
+    if (label_ar !== undefined) updates.label_ar = label_ar;
+    if (submission_deadline !== undefined) updates.submission_deadline = submission_deadline || null;
+    if (status !== undefined) updates.status = status;
+    await period.update(updates);
     res.json({ period });
 });
 

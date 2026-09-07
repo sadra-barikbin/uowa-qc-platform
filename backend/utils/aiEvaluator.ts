@@ -9,7 +9,11 @@ import { SETTING_AI_EVAL_PROMPT, DEFAULT_AI_EVAL_SYSTEM_PROMPT, renderSystemProm
 
 // Default to Sonnet 5 (fast, reads Arabic + PDFs well); override via env to escalate to Opus.
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
-const uploadDir = path.join(__dirname, '../uploads');
+// Must match where the submission routes actually store files: the desktop app points this at a
+// writable location (Electron's userData) via UPLOAD_DIR. A hardcoded backend/uploads made the AI
+// evaluator read from the wrong directory in the desktop build, so every criterion looked
+// document-less and was skipped. Keep this in sync with routes/submissions.ts.
+const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '../uploads');
 
 const IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const TEXT_MIME = new Set(['text/plain', 'text/markdown', 'text/csv']);
