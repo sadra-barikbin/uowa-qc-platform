@@ -10,6 +10,7 @@
     "icon": "node scripts/make-icon.js",
     "start": "electron .",
     "dev": "node scripts/stage.js && electron .",
+    "dev:live": "electron . --dev-live",
     "pack": "node scripts/stage.js && electron-builder --dir",
     "build": "node scripts/stage.js && electron-builder",
     "release": "node scripts/stage.js && electron-builder --publish always"

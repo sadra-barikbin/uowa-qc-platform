@@ -1,55 +1,56 @@
 <!doctype html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="utf-8">
-    <title>Settings — Anthropic API Key</title>
+    <title>الإعدادات — مفتاح Anthropic API</title>
     <style>
-        :root { --bg:#0f172a; --panel:#111c33; --text:#e2e8f0; --muted:#94a3b8; --blue:#1d4ed8; --gold:#fdbe34; --line:#243247; }
+        /* Light theme matching the main app (frontend/src/styles/global.css). */
+        :root { --bg:#f9fafb; --panel:#ffffff; --text:#1f2937; --muted:#6b7280; --blue:#1a56db; --line:#e5e7eb; }
         * { box-sizing: border-box; }
-        body { font-family: "Segoe UI", system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); padding: 22px; }
+        body { font-family: "Segoe UI", "Tahoma", system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); padding: 22px; }
         h1 { font-size: 17px; margin: 0 0 4px; }
-        p.help { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0 0 16px; }
+        p.help { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin: 0 0 16px; }
         label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
         .row { display: flex; gap: 8px; }
         input[type=password], input[type=text] { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-            color: var(--text); padding: 10px 12px; font-size: 13px; font-family: ui-monospace, monospace; }
+            color: var(--text); padding: 10px 12px; font-size: 13px; font-family: ui-monospace, monospace; direction: ltr; text-align: left; }
         input:focus { outline: none; border-color: var(--blue); }
         button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px;
             padding: 10px 14px; font-size: 13px; cursor: pointer; }
         button:hover { border-color: var(--blue); }
-        button.primary { background: var(--blue); border-color: var(--blue); }
+        button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
         button.ghost { background: transparent; }
         button.link { border: none; background: none; color: var(--muted); padding: 6px; }
         .toggle { width: 44px; }
         .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
-        .status { margin-top: 16px; font-size: 12.5px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
-        .status.set { border-color: #14532d; color: #86efac; }
-        .status.warn { border-color: #7c2d12; color: #fdba74; }
+        .status { margin-top: 16px; font-size: 12.5px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); }
+        .status.set { border-color: #84e1bc; background: #e3fcef; color: #046c4e; }
+        .status.warn { border-color: #f8b4b4; background: #fdf2f2; color: #c81e1e; }
         .spacer { flex: 1; }
     </style>
 </head>
 <body>
-    <h1>Anthropic API Key</h1>
+    <h1>مفتاح Anthropic API</h1>
     <p class="help">
-        Used only for the optional AI grading feature. The key is stored <b>encrypted on this computer</b>
-        (Windows account protection) and never leaves it. Get a key from
-        console.anthropic.com → API Keys. Changes take effect after a restart.
+        يُستخدم فقط لميزة التقييم الآلي (الذكاء الاصطناعي) الاختيارية. يُخزَّن المفتاح <b>مُشفَّراً على هذا الحاسوب</b>
+        (حماية حساب Windows) ولا يغادره أبداً. احصل على مفتاح من
+        console.anthropic.com ← API Keys. تُطبَّق التغييرات بعد إعادة التشغيل.
     </p>
 
-    <label for="key">API key</label>
+    <label for="key">مفتاح API</label>
     <div class="row">
         <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
-        <button id="toggle" class="toggle ghost" title="Show / hide">👁</button>
+        <button id="toggle" class="toggle ghost" title="إظهار / إخفاء">👁</button>
     </div>
 
     <div class="actions">
-        <button id="save" class="primary">Save</button>
-        <button id="clear" class="ghost">Remove key</button>
+        <button id="save" class="primary">حفظ</button>
+        <button id="clear" class="ghost">حذف المفتاح</button>
         <span class="spacer"></span>
-        <button id="close" class="link">Close</button>
+        <button id="close" class="link">إغلاق</button>
     </div>
 
-    <div id="status" class="status">Checking…</div>
+    <div id="status" class="status">جارٍ التحقق…</div>
 
     <script>
         const $ = (id) => document.getElementById(id);
@@ -59,16 +60,16 @@
             const s = await window.apiKeyApi.status();
             if (!s.encryptionAvailable) {
                 statusEl.className = 'status warn';
-                statusEl.textContent = 'Secure storage is unavailable on this system — the key cannot be stored safely, so saving is disabled.';
+                statusEl.textContent = 'التخزين الآمن غير متوفر على هذا النظام — لا يمكن حفظ المفتاح بأمان، لذا تم تعطيل الحفظ.';
                 $('save').disabled = true;
                 return;
             }
             if (s.hasKey) {
                 statusEl.className = 'status set';
-                statusEl.textContent = 'A key is currently saved. Enter a new one to replace it, or remove it.';
+                statusEl.textContent = 'هناك مفتاح محفوظ حالياً. أدخل مفتاحاً جديداً لاستبداله، أو احذفه.';
             } else {
                 statusEl.className = 'status';
-                statusEl.textContent = 'No key saved yet. AI grading is disabled until you add one.';
+                statusEl.textContent = 'لا يوجد مفتاح محفوظ بعد. التقييم الآلي معطَّل حتى تُضيف مفتاحاً.';
             }
         }
 
@@ -79,7 +80,7 @@
 
         $('save').addEventListener('click', async () => {
             const key = $('key').value.trim();
-            if (!key) { statusEl.className = 'status warn'; statusEl.textContent = 'Please enter an API key.'; return; }
+            if (!key) { statusEl.className = 'status warn'; statusEl.textContent = 'الرجاء إدخال مفتاح API.'; return; }
             try {
                 $('save').disabled = true;
                 await window.apiKeyApi.save(key);

@@ -107,4 +107,8 @@ export const settingsAPI = {
     resetAiEvalPrompt: () => api.delete('/settings/ai-eval-prompt'),
 };
 
+export const systemAPI = {
+    health: () => api.get('/health'),
+};
+
 export default api;

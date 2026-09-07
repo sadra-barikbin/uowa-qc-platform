@@ -55,10 +55,34 @@ Installed apps check that repo's Releases on launch, download in the background,
 | Script | What it does |
 |--------|--------------|
 | `npm run stage` | Build backend + frontend and copy them into `resources/` (no packaging). |
-| `npm run dev`   | Stage, then run the app via `electron .` (uses the repo's backend/frontend). |
+| `npm run dev`   | Stage (full build), then run the app via `electron .` — the staged production bundle. |
+| `npm run dev:live` | **Hot-reload dev loop, no rebuilds** — see below. Use this for iterating on code. |
 | `npm run pack`  | Stage + produce an unpacked app in `dist/win-unpacked/` (no installer — fast). |
 | `npm run build` | Stage + produce the NSIS installer, no publish. |
 | `npm run release` | Stage + build + publish to GitHub Releases (needs `GH_TOKEN`). |
+
+### Hot-reload dev loop (`npm run dev:live`)
+
+For iterating on the app without rebuilding each time:
+
+```bash
+cd desktop
+npm run dev:live
+```
+
+The Electron shell launches the backend through **ts-node-dev** (recompiles on save, no `tsc`) and
+the frontend through the **CRA dev server** (HMR, no `react-scripts build`), then loads the CRA URL in
+the window. Edit anything under `backend/` or `frontend/src/` and the change appears live — the
+backend restarts itself, the frontend hot-reloads in place. All the real desktop behaviours are kept:
+the **embedded PGlite database** (same `%APPDATA%` data dir as a normal run), the **File → Settings —
+Anthropic API Key…** menu, and auto-update stays off (dev only).
+
+- One-time: `npm install` in `backend/`, `frontend/`, and `desktop/` so the dev toolchains exist.
+- Uses fixed ports **5000** (backend API) and **3001** (frontend); stop anything already on them
+  (e.g. a separate `backend`/`frontend` dev server) before starting.
+- The first launch is slow while the CRA dev server does its initial compile and PGlite seeds; the
+  window shows the "Starting…" screen until both are ready. Later reloads are instant.
+- `npm run dev` (staged) is still the way to smoke-test the actual production bundle before packaging.
 
 ## Notes / one-time machine setup
 
