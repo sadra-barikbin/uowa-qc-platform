@@ -51,6 +51,14 @@ switched on by env vars the shell sets (`PGLITE_DIR`, `FRONTEND_DIR`, `UPLOAD_DI
 when they're unset the backend behaves exactly as before. The DB + uploads live under Electron `userData` and
 survive updates.
 
+One shell behaviour is worth knowing about before touching `main.js`: **the main window now has a
+preload** (`desktop/preload-app.js`), which it previously did not. It exposes exactly one setter,
+`window.qcDesktop.setAiBusy(bool)`, so the page can report that an AI evaluation run is in flight;
+`main.js` keeps that in `aiBusy` and asks before closing the window, quitting from the menu,
+reloading, or relaunching after an API-key change, and defers the auto-update restart prompt until
+the run ends. This matters because closing the window kills the backend child process with it,
+which would abort the run mid-call (see the AI-run note in the frontend section below).
+
 Two backend behaviours are desktop-only (guarded by `PGLITE_DIR`, in `server.ts`'s `start()`):
 - **Clean first-run seed** (`backend/utils/bootstrap.ts` `ensureSeeded`): real colleges/departments/13
   indicators + one admin, seeded only when the DB is empty (`User.count() === 0`). It reuses the exported
@@ -152,6 +160,20 @@ already-divided 0–1 fraction, `score_100` sends the raw 0–100 value (the bac
 `raw_values: {numerator, denominator}` with no `score` at all — get this wrong and `POST /api/evaluations`
 rejects it. `DepartmentDetail.js` links out to whichever of those two pages the signed-in role can use, with
 `?period=&department=` query params the target page pre-fills from.
+
+The AI assessor run (`🤖 تقييم آلي` per indicator, `تقييم آلي للكل` for a whole department) is
+**not** component state: `frontend/src/utils/aiRun.js` is a module-level store that owns the
+per-indicator loop, its progress toast and the one-run-at-a-time rule. A whole-department run is
+one `POST /api/evaluations/ai` per indicator and takes minutes, and when the loop lived in
+`Evaluations.js` it vanished from the UI as soon as the user navigated away — the loop itself kept
+going and each finished indicator was still saved server-side, but the progress counter, the
+per-indicator spinner and the "already running" guard went with the unmounted component, so coming
+back showed an idle page with the run button re-enabled. From the store, the page re-renders the
+live run on mount and merges each indicator's results as they land (a `seq`-guarded delta, plus an
+overlay in `loadMatrix` for results committed while a matrix request was in flight). The run still
+dies with the page, so the store also installs a `beforeunload` guard and pushes the busy flag to
+the desktop shell. **A server-side evaluation job is the real fix** — this is the UX floor under
+it, not a substitute.
 
 Two backend routes (`GET /api/submissions`, `GET /api/evaluations`, listing without a `department_id` filter)
 were gated with `authorize()` during the frontend sync, since they had no role check at all — a `dept_rep` or

@@ -284,6 +284,42 @@ function stopBackend() {
     if (frontendChild) { killTree(frontendChild); frontendChild = null; }
 }
 
+// ── "an AI evaluation is running" guard ──────────────────────────────────────
+// The evaluation loop lives in the page and each indicator is one long backend call, so closing,
+// quitting or reloading aborts the run at whatever indicator it had reached: the finished ones are
+// already saved, the rest simply never run. That is worth a question rather than a silent loss.
+// The renderer pushes this flag through preload-app.js whenever a run starts or ends.
+let aiBusy = false;
+let quitApproved = false; // the user has accepted interrupting the run — stop asking
+
+ipcMain.on('ai:busy', (_e, busy) => { aiBusy = !!busy; });
+
+// Ask whether to go ahead and interrupt the run. Synchronous on purpose: 'close' and 'before-quit'
+// can't await, and the answer decides whether the event is cancelled. Returns true to proceed.
+// Keep every string here pure Arabic — the native dialog has an LTR base direction, so a Latin run
+// mid-sentence splits the text into runs that get reordered on screen (see the API-key dialog).
+function confirmInterruptAi(actionLabel) {
+    return dialog.showMessageBoxSync(mainWindow || undefined, {
+        type: 'warning',
+        buttons: ['البقاء في التطبيق', actionLabel],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: 'التقييم الآلي قيد التنفيذ',
+        message: 'التقييم الآلي ما زال قيد التنفيذ.',
+        detail: 'المؤشرات التي اكتمل تقييمها محفوظة بالفعل، أما المؤشر الجاري وما بعده فسيتوقف عند هذا الحد. '
+            + 'يمكنك تشغيل التقييم الآلي مرة أخرى لاحقاً لإكمال ما تبقّى.',
+    }) === 1;
+}
+
+// Resolves as soon as no evaluation is running (immediately, when none is).
+function whenAiIdle() {
+    if (!aiBusy) return Promise.resolve();
+    return new Promise((resolve) => {
+        const timer = setInterval(() => { if (!aiBusy) { clearInterval(timer); resolve(); } }, 5000);
+    });
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1440,
@@ -293,7 +329,9 @@ function createWindow() {
         // Packaged builds take the window icon from the app executable; in `npm run dev` we point
         // at the generated crest so the dev window/taskbar match.
         ...(app.isPackaged ? {} : { icon: path.join(__dirname, 'build', 'icon.ico') }),
-        webPreferences: { contextIsolation: true, nodeIntegration: false },
+        // preload-app.js exposes exactly one thing: the page telling us when a long AI evaluation
+        // is running, so the close/quit guard below can ask before killing it.
+        webPreferences: { preload: path.join(__dirname, 'preload-app.js'), contextIsolation: true, nodeIntegration: false },
     });
     // A simple loading screen while the backend spins up. The first launch is noticeably slower
     // (the embedded database initializes and seeds), so we say so; later launches are quick.
@@ -306,7 +344,23 @@ function createWindow() {
         '</body></html>';
     mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(loadingHtml));
     mainWindow.once('ready-to-show', () => mainWindow.show());
-    mainWindow.on('closed', () => { mainWindow = null; });
+    mainWindow.on('closed', () => { mainWindow = null; aiBusy = false; });
+
+    // Closing the window tears down the backend with it, which aborts an AI evaluation mid-call.
+    mainWindow.on('close', (e) => {
+        if (quitApproved || !aiBusy) return;
+        e.preventDefault();
+        if (!confirmInterruptAi('إغلاق التطبيق')) return;
+        quitApproved = true;
+        mainWindow.destroy(); // destroy, not close: skips this handler and the page's own unload prompt
+    });
+
+    // The page blocks reloads while a run is in flight (its beforeunload handler). Electron would
+    // cancel the reload silently, which reads as a dead menu item — so ask the same question here.
+    // Calling preventDefault() on this event is what LETS the unload go ahead.
+    mainWindow.webContents.on('will-prevent-unload', (e) => {
+        if (quitApproved || confirmInterruptAi('إعادة التحميل')) e.preventDefault();
+    });
 }
 
 function openSettingsWindow() {
@@ -331,7 +385,7 @@ function openSettingsWindow() {
     settingsWindow.on('closed', () => { settingsWindow = null; });
 }
 
-// IPC for the settings window only (the main app window has no preload / no IPC surface).
+// IPC for the settings window (the main app window's only channel is the ai:busy flag above).
 ipcMain.handle('apikey:status', () => ({
     hasKey: hasApiKey(),
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
@@ -351,7 +405,11 @@ ipcMain.handle('apikey:save', async (_e, key) => {
         // reordered (garbled). Single-run Arabic renders correctly.
         message: 'تم حفظ المفتاح بأمان. هل تريد إعادة تشغيل التطبيق لتفعيل التقييم الآلي؟',
     });
-    if (response === 0) { app.isQuitting = true; stopBackend(); app.relaunch(); app.exit(0); }
+    if (response === 0) {
+        // This relaunch path exits the process outright, so it needs the same guard as the others.
+        if (aiBusy && !confirmInterruptAi('أعد التشغيل')) return { ok: true };
+        app.isQuitting = true; stopBackend(); app.relaunch(); app.exit(0);
+    }
     return { ok: true };
 });
 ipcMain.handle('apikey:clear', () => { clearApiKey(); log('anthropic key cleared'); return { ok: true }; });
@@ -381,6 +439,8 @@ function buildMenu() {
 function checkForUpdates() {
     if (!app.isPackaged) return; // updates only make sense for an installed build
     autoUpdater.on('update-downloaded', async () => {
+        // Never put a restart prompt in front of a running evaluation — the update can wait.
+        await whenAiIdle();
         const { response } = await dialog.showMessageBox({
             type: 'info',
             buttons: ['Restart now', 'Later'],
@@ -429,5 +489,18 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     app.on('window-all-closed', () => { app.isQuitting = true; stopBackend(); app.quit(); });
-    app.on('before-quit', () => { app.isQuitting = true; stopBackend(); });
+
+    // Quitting from the menu (or anything else calling app.quit()) skips the window's own close
+    // guard, so ask here too before the backend is stopped out from under a running evaluation.
+    app.on('before-quit', (e) => {
+        if (!quitApproved && aiBusy) {
+            e.preventDefault();
+            if (!confirmInterruptAi('الخروج')) return;
+            quitApproved = true;
+            setImmediate(() => app.quit());
+            return;
+        }
+        app.isQuitting = true;
+        stopBackend();
+    });
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { departmentsAPI, periodsAPI, submissionsAPI, evaluationsAPI } from '../../utils/api';
+import { useAiRun, getAiRun, startAiRun } from '../../utils/aiRun';
 
 const scoreColor = s => s >= 90 ? '#0e9f6e' : s >= 70 ? '#1a56db' : s >= 50 ? '#c27803' : '#e02424';
 const LOW_CONF = 0.8; // AI scores under this confidence are flagged for a closer look
@@ -57,14 +58,26 @@ export default function Evaluations() {
     const [matrix, setMatrix] = useState([]);
     const [rowState, setRowState] = useState({}); // criterion_id -> { percent, numerator, denominator, notes }
     const [savingId, setSavingId] = useState(null);
-    const [aiId, setAiId] = useState(null);
-    const [runningAll, setRunningAll] = useState(false);
     const [acceptingAll, setAcceptingAll] = useState(false);
     const [loading, setLoading] = useState(false);
     const [expanded, setExpanded] = useState({}); // indicator_id -> bool
     const [q, setQ] = useState('');
     const [filter, setFilter] = useState('all'); // all | unscored | ai | low
     const cardRefs = useRef({});
+
+    // The AI run lives in a module store, not in this component, so it survives navigating away
+    // and back (see utils/aiRun.js). `aiHere` is a run over the department currently on screen;
+    // a run over another department still blocks starting a second one.
+    const aiRun = useAiRun();
+    const aiHere = aiRun.running && aiRun.periodId === selPeriod && aiRun.departmentId === selDept;
+    const appliedSeq = useRef(aiRun.seq); // deltas already merged into `matrix`
+    const deptName = departments.find(d => d.id === selDept)?.name_ar || '';
+    const currentAiIndicatorName = matrix.find(g => g.indicator.id === aiRun.currentIndicatorId)?.indicator.name_ar || '';
+    // Indicators this run hasn't reached yet, so their buttons can say so.
+    const aiQueued = useMemo(
+        () => new Set(aiRun.running ? aiRun.indicatorIds.slice(aiRun.indicatorIds.indexOf(aiRun.currentIndicatorId) + 1) : []),
+        [aiRun.running, aiRun.indicatorIds, aiRun.currentIndicatorId],
+    );
 
     useEffect(() => {
         periodsAPI.list().then(r => {
@@ -80,7 +93,20 @@ export default function Evaluations() {
         setLoading(true);
         evaluationsAPI.matrix({ period_id: selPeriod, department_id: selDept })
             .then(r => {
-                const m = r.data.matrix || [];
+                let m = r.data.matrix || [];
+                // A run in flight over this same department can commit results between this request
+                // going out and its response coming back; overlay what the store already has so those
+                // rows don't render stale. Only while running — once a run is over the server is the
+                // only truth (the reviewer may have edited a row since).
+                const run = getAiRun();
+                const overlay = run.running && run.periodId === selPeriod && run.departmentId === selDept ? run.results : null;
+                if (overlay) {
+                    m = m.map(group => ({
+                        ...group,
+                        criteria: group.criteria.map(item => (overlay[item.criterion.id] ? { ...item, evaluation: overlay[item.criterion.id] } : item)),
+                    }));
+                }
+                appliedSeq.current = run.seq;
                 setMatrix(m);
                 const rs = {};
                 m.forEach(group => group.criteria.forEach(({ criterion, evaluation }) => {
@@ -141,8 +167,14 @@ export default function Evaluations() {
             return next;
         });
     };
-    // Shape an /ai result row into an evaluation object for patchEvaluations.
-    const aiEvalToEvaluation = e => ({ score: e.score, evaluation_method: 'ai', ai_confidence: e.confidence, ai_rationale: e.rationale, reviewer_notes: e.rationale, raw_values: {} });
+
+    // Merge each indicator's results into the matrix as the run finishes them, including a delta
+    // that landed while this page was unmounted. The seq guard applies every delta exactly once.
+    useEffect(() => {
+        if (aiRun.seq === appliedSeq.current) return;
+        appliedSeq.current = aiRun.seq;
+        if (aiHere && aiRun.delta) patchEvaluations(aiRun.delta);
+    }, [aiRun.seq]);
 
     const saveRow = async (criterion, submissionId) => {
         const state = rowState[criterion.id] || {};
@@ -210,36 +242,16 @@ export default function Evaluations() {
         } finally { setAcceptingAll(false); }
     };
 
-    const runAi = async (indicatorId) => {
-        setAiId(indicatorId);
-        try {
-            const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: indicatorId });
-            const { evaluated = [], skipped = [] } = r.data;
-            const updates = {};
-            evaluated.forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
-            patchEvaluations(updates);
-            toast.success(`تقييم آلي: ${evaluated.length} معيار${skipped.length ? ` (تُخطّي ${skipped.length} بلا مستندات)` : ''}`);
-        } catch (err) { toast.error(err.response?.data?.error || 'خطأ في التقييم الآلي'); }
-        finally { setAiId(null); }
-    };
+    // Both runners hand off to the module store, which owns the loop, the progress toast and the
+    // "one run at a time" rule — so the run keeps going, and keeps reporting, across navigation.
+    const runAi = (indicatorId) => startAiRun({
+        periodId: selPeriod, departmentId: selDept, departmentName: deptName, indicatorIds: [indicatorId],
+    });
 
-    const runAllAi = async () => {
-        if (runningAll || !matrix.length) return;
-        setRunningAll(true);
-        const ids = matrix.map(g => g.indicator.id);
-        const t = toast.loading(`التقييم الآلي: 0/${ids.length}`);
-        let done = 0; const updates = {};
-        try {
-            for (const id of ids) {
-                try { const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: id }); (r.data.evaluated || []).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); }); }
-                catch { /* keep going; one indicator failing shouldn't abort the batch */ }
-                done++;
-                toast.loading(`التقييم الآلي: ${done}/${ids.length}`, { id: t });
-            }
-            patchEvaluations(updates);
-            toast.success(`اكتمل التقييم الآلي — ${Object.keys(updates).length} معياراً`, { id: t });
-        } finally { setRunningAll(false); }
-    };
+    const runAllAi = () => startAiRun({
+        periodId: selPeriod, departmentId: selDept, departmentName: deptName,
+        indicatorIds: matrix.map(g => g.indicator.id),
+    });
 
     const download = async (doc) => {
         try {
@@ -369,6 +381,31 @@ export default function Evaluations() {
                 </div>
             </div>
 
+            {/* A run in flight, rebuilt from the store on every mount — so leaving this page and
+                coming back shows the run as it really is instead of an idle screen. */}
+            {aiRun.running && (
+                <div className="card" style={{ padding: '12px 16px', marginBottom: 16, background: '#eef2ff', border: '1px solid #c3ddfd' }}>
+                    <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
+                        <div style={{ width: 16, height: 16, border: '2px solid #c3ddfd', borderTopColor: '#1a56db', borderRadius: '50%', animation: 'spin .7s linear infinite', flexShrink: 0 }} />
+                        <strong style={{ fontSize: 14, color: '#1a56db' }}>
+                            {aiHere
+                                ? `🤖 التقييم الآلي قيد التنفيذ — ${aiRun.done}/${aiRun.total} مؤشراً`
+                                : `🤖 التقييم الآلي قيد التنفيذ لقسم ${aiRun.departmentName || 'آخر'} — ${aiRun.done}/${aiRun.total} مؤشراً`}
+                        </strong>
+                        {aiHere && currentAiIndicatorName && (
+                            <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>الجاري الآن: {currentAiIndicatorName}</span>
+                        )}
+                    </div>
+                    <div style={{ height: 6, background: '#fff', borderRadius: 3, overflow: 'hidden', margin: '10px 0 8px' }}>
+                        <div style={{ height: '100%', width: `${aiRun.total ? Math.round((aiRun.done / aiRun.total) * 100) : 0}%`, background: '#1a56db', transition: 'width .3s' }} />
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>
+                        يمكنك التنقل بين الصفحات أو تصغير النافذة — التقييم يكمل عمله وتُحفظ نتائج كل مؤشر عند انتهائه.
+                        لا تُغلق التطبيق ولا تُعِد تحميل الصفحة قبل الانتهاء، وإلا توقّف ما لم يكتمل بعد.
+                    </span>
+                </div>
+            )}
+
             {loading && <div className="flex items-center justify-center" style={{ height: 120 }}><div className="spinner" /></div>}
 
             {/* Sticky summary + jump index + filters */}
@@ -391,8 +428,9 @@ export default function Evaluations() {
                                     {acceptingAll ? 'جاري الاعتماد...' : `✓ اعتماد كل الآلي (${overall.aiPending + overall.low})`}
                                 </button>
                             )}
-                            <button className="btn btn-secondary btn-sm" onClick={runAllAi} disabled={runningAll}>
-                                {runningAll ? 'جاري التقييم الآلي...' : '🤖 تقييم آلي للكل'}
+                            <button className="btn btn-secondary btn-sm" onClick={runAllAi} disabled={aiRun.running}>
+                                {aiHere ? `جاري التقييم الآلي... (${aiRun.done}/${aiRun.total})`
+                                    : aiRun.running ? 'التقييم الآلي مشغول' : '🤖 تقييم آلي للكل'}
                             </button>
                         </div>
                     </div>
@@ -461,8 +499,9 @@ export default function Evaluations() {
                                 <span style={{ fontSize: 13, fontWeight: 700, color: s.pct != null ? scoreColor(s.pct) : 'var(--gray-400)' }}>
                                     {s.pct != null ? `${s.pct}%` : '—'}
                                 </span>
-                                <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); runAi(group.indicator.id); }} disabled={aiId === group.indicator.id}>
-                                    {aiId === group.indicator.id ? 'جاري التقييم...' : '🤖 تقييم آلي'}
+                                <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); runAi(group.indicator.id); }} disabled={aiRun.running}>
+                                    {aiHere && aiRun.currentIndicatorId === group.indicator.id ? 'جاري التقييم...'
+                                        : aiHere && aiQueued.has(group.indicator.id) ? 'في الانتظار...' : '🤖 تقييم آلي'}
                                 </button>
                             </div>
                         </div>

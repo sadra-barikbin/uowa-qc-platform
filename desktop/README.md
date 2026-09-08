@@ -17,6 +17,16 @@ The Electron shell ([`main.js`](main.js)) on launch:
 3. Waits for `/api/health`, then opens the window on that local URL.
 4. Checks GitHub Releases for updates and installs them on the next restart.
 
+### Closing the app during an AI evaluation
+
+A whole-department AI evaluation is one call per indicator and can run for minutes, and the backend
+serving it is this shell's child process — so closing the window would abort it mid-call. The app
+window carries a one-setter preload ([`preload-app.js`](preload-app.js)) through which the page
+reports a run in flight; while one is, closing the window, quitting from the menu, reloading, and
+the post-API-key relaunch all ask first ("stay in the app" is the default), and an auto-update
+restart prompt is held back until the run finishes. Indicators already graded are saved either way;
+only the current one and those after it are lost, and re-running picks the rest up.
+
 First launch seeds a **clean institutional dataset** (real colleges, departments, the 13 indicators,
 and a single admin login `admin@uowa.edu.iq` / `Admin@123`) and opens the current month's evaluation
 period. It never re-seeds after that.
