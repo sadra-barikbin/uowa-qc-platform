@@ -18,6 +18,7 @@ import { ensureViews, dropViews } from './utils/ensureViews';
 import { startPglite } from './utils/pglite';
 import { runMigrations } from './utils/migrator';
 import { ensureSeeded } from './utils/bootstrap';
+import { anyAiJobRunning } from './utils/aiJobs';
 import { User } from './models';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -89,7 +90,9 @@ function appVersion(): string {
     }
     return 'dev';
 }
-app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', version: appVersion(), timestamp: new Date() }));
+// `aiRunning` lets the desktop shell warn before closing while a background AI
+// evaluation is in flight (closing kills the backend child and aborts the run).
+app.get('/api/health', (req: Request, res: Response) => res.json({ status: 'ok', version: appVersion(), aiRunning: anyAiJobRunning(), timestamp: new Date() }));
 
 // ── Sentry test route (dev only) ──────────────────────────────
 // Hit GET /api/debug-sentry to confirm errors reach Sentry, then remove.

@@ -57,14 +57,20 @@ export default function Evaluations() {
     const [matrix, setMatrix] = useState([]);
     const [rowState, setRowState] = useState({}); // criterion_id -> { percent, numerator, denominator, notes }
     const [savingId, setSavingId] = useState(null);
-    const [aiId, setAiId] = useState(null);
-    const [runningAll, setRunningAll] = useState(false);
     const [acceptingAll, setAcceptingAll] = useState(false);
     const [loading, setLoading] = useState(false);
     const [expanded, setExpanded] = useState({}); // indicator_id -> bool
     const [q, setQ] = useState('');
     const [filter, setFilter] = useState('all'); // all | unscored | ai | low
     const cardRefs = useRef({});
+
+    // Background AI-evaluation job the backend runs (survives navigation/minimize; the page
+    // only observes it). `job` is the latest snapshot; the refs track what we've already
+    // reflected so a poll patches only newly-graded criteria and finalizes exactly once.
+    const [job, setJob] = useState(null);
+    const patchedRef = useRef({ jobId: null, count: 0 });
+    const finalizedRef = useRef(new Set());
+    const applyRef = useRef(() => {});
 
     useEffect(() => {
         periodsAPI.list().then(r => {
@@ -99,6 +105,40 @@ export default function Evaluations() {
     }, [selPeriod, selDept]);
 
     useEffect(() => { loadMatrix(); }, [loadMatrix]);
+
+    // Reconnect to a running job when the period/department changes (or on first load), so
+    // returning to this page mid-run shows live progress instead of a dead button. Finished
+    // jobs are already reflected by loadMatrix, so we only observe running ones.
+    const reconnect = useCallback(async () => {
+        if (!selPeriod || !selDept) { setJob(null); return; }
+        try {
+            const r = await evaluationsAPI.activeAiJob({ period_id: selPeriod, department_id: selDept });
+            const j = r.data.job;
+            if (j && j.status === 'running') {
+                // The just-loaded matrix already holds the indicators finished so far; start
+                // patching from here so we don't restamp (and wipe edits on) loaded rows.
+                patchedRef.current = { jobId: j.id, count: j.evaluated.length };
+                finalizedRef.current.delete(j.id);
+                setJob(j);
+            } else {
+                setJob(null);
+            }
+        } catch { setJob(null); }
+    }, [selPeriod, selDept]);
+    useEffect(() => { reconnect(); }, [reconnect]);
+
+    // Poll the active job while it runs; applyRef.current holds the latest applier so this
+    // effect needn't re-subscribe on every render. Cleared as soon as the job leaves 'running'.
+    useEffect(() => {
+        if (!job || job.status !== 'running') return undefined;
+        let cancelled = false;
+        const tick = async () => {
+            try { const r = await evaluationsAPI.getAiJob(job.id); if (!cancelled) applyRef.current(r.data.job); }
+            catch (err) { if (err.response?.status === 404 && !cancelled) setJob(null); } // pruned/gone
+        };
+        const iv = setInterval(tick, 1500);
+        return () => { cancelled = true; clearInterval(iv); };
+    }, [job?.id, job?.status]);
 
     const updateRow = (criterionId, patch) => setRowState(prev => ({ ...prev, [criterionId]: { ...prev[criterionId], ...patch } }));
 
@@ -210,36 +250,53 @@ export default function Evaluations() {
         } finally { setAcceptingAll(false); }
     };
 
-    const runAi = async (indicatorId) => {
-        setAiId(indicatorId);
-        try {
-            const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: indicatorId });
-            const { evaluated = [], skipped = [] } = r.data;
+    // Apply a job snapshot: patch newly-graded criteria into the matrix (only the slice we
+    // haven't applied yet, so unsaved edits on other rows survive), store the snapshot, and
+    // toast a summary exactly once when it finishes. Kept on a ref so the polling effect and
+    // the start/reconnect paths all use the same, always-current closure.
+    applyRef.current = (snap) => {
+        if (!snap) return;
+        if (patchedRef.current.jobId !== snap.id) patchedRef.current = { jobId: snap.id, count: 0 };
+        const already = patchedRef.current.count;
+        if (snap.evaluated.length > already) {
             const updates = {};
-            evaluated.forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
+            snap.evaluated.slice(already).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); });
             patchEvaluations(updates);
-            toast.success(`تقييم آلي: ${evaluated.length} معيار${skipped.length ? ` (تُخطّي ${skipped.length} بلا مستندات)` : ''}`);
-        } catch (err) { toast.error(err.response?.data?.error || 'خطأ في التقييم الآلي'); }
-        finally { setAiId(null); }
+            patchedRef.current.count = snap.evaluated.length;
+        }
+        setJob(snap);
+        if (snap.status !== 'running' && !finalizedRef.current.has(snap.id)) {
+            finalizedRef.current.add(snap.id);
+            const errs = snap.indicators.filter(i => i.status === 'error').length;
+            toast.success(`اكتمل التقييم الآلي — ${snap.evaluated.length} معياراً`
+                + `${snap.skipped.length ? ` (تُخطّي ${snap.skipped.length})` : ''}`
+                + `${errs ? ` · فشل ${errs} مؤشر` : ''}`);
+        }
     };
 
-    const runAllAi = async () => {
-        if (runningAll || !matrix.length) return;
-        setRunningAll(true);
-        const ids = matrix.map(g => g.indicator.id);
-        const t = toast.loading(`التقييم الآلي: 0/${ids.length}`);
-        let done = 0; const updates = {};
+    // Start a background job (a single indicator, or all when indicatorIds is undefined). The
+    // backend runs the loop; the polling effect above drives progress from here.
+    const startJob = async (indicatorIds) => {
+        if (job?.status === 'running') { toast('التقييم الآلي قيد التنفيذ بالفعل'); return; }
         try {
-            for (const id of ids) {
-                try { const r = await evaluationsAPI.ai({ period_id: selPeriod, department_id: selDept, indicator_id: id }); (r.data.evaluated || []).forEach(e => { updates[e.criterion_id] = aiEvalToEvaluation(e); }); }
-                catch { /* keep going; one indicator failing shouldn't abort the batch */ }
-                done++;
-                toast.loading(`التقييم الآلي: ${done}/${ids.length}`, { id: t });
-            }
-            patchEvaluations(updates);
-            toast.success(`اكتمل التقييم الآلي — ${Object.keys(updates).length} معياراً`, { id: t });
-        } finally { setRunningAll(false); }
+            const r = await evaluationsAPI.startAiJob({ period_id: selPeriod, department_id: selDept, indicator_ids: indicatorIds });
+            finalizedRef.current.delete(r.data.job.id);
+            patchedRef.current = { jobId: r.data.job.id, count: 0 };
+            applyRef.current(r.data.job);
+        } catch (err) {
+            if (err.response?.status === 409) { toast('التقييم الآلي قيد التنفيذ بالفعل'); reconnect(); }
+            else toast.error(err.response?.data?.error || 'خطأ في التقييم الآلي');
+        }
     };
+    const runAi = (indicatorId) => startJob([indicatorId]);
+    const runAllAi = () => { if (matrix.length) startJob(undefined); };
+
+    const jobRunning = job?.status === 'running';
+    // Indicators still queued/grading in the running job — used to show per-card progress.
+    const busyIndicatorIds = useMemo(
+        () => (jobRunning ? new Set(job.indicators.filter(i => i.status === 'pending' || i.status === 'running').map(i => i.indicator_id)) : new Set()),
+        [job, jobRunning],
+    );
 
     const download = async (doc) => {
         try {
@@ -387,12 +444,12 @@ export default function Evaluations() {
                         </div>
                         <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
                             {(overall.aiPending + overall.low) > 0 && (
-                                <button className="btn btn-sm" style={{ background: '#0e9f6e', color: '#fff' }} onClick={acceptAllAi} disabled={acceptingAll}>
+                                <button className="btn btn-sm" style={{ background: '#0e9f6e', color: '#fff' }} onClick={acceptAllAi} disabled={acceptingAll || jobRunning}>
                                     {acceptingAll ? 'جاري الاعتماد...' : `✓ اعتماد كل الآلي (${overall.aiPending + overall.low})`}
                                 </button>
                             )}
-                            <button className="btn btn-secondary btn-sm" onClick={runAllAi} disabled={runningAll}>
-                                {runningAll ? 'جاري التقييم الآلي...' : '🤖 تقييم آلي للكل'}
+                            <button className="btn btn-secondary btn-sm" onClick={runAllAi} disabled={jobRunning}>
+                                {jobRunning ? `جاري التقييم الآلي... (${job.completed}/${job.total})` : '🤖 تقييم آلي للكل'}
                             </button>
                         </div>
                     </div>
@@ -401,6 +458,23 @@ export default function Evaluations() {
                     <div style={{ height: 6, background: 'var(--gray-100)', borderRadius: 3, overflow: 'hidden', margin: '10px 0' }}>
                         <div style={{ height: '100%', width: `${overall.total ? Math.round((overall.scored / overall.total) * 100) : 0}%`, background: 'var(--primary)', transition: 'width .3s' }} />
                     </div>
+
+                    {/* live AI-job progress: reassures the user they can leave the page / minimize,
+                        and warns them not to close the app while it runs */}
+                    {jobRunning && (
+                        <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                            <div style={{ fontSize: 13, color: '#1a56db', fontWeight: 600 }}>
+                                🤖 التقييم الآلي قيد التنفيذ — {job.completed}/{job.total}
+                                {(() => { const cur = job.indicators.find(i => i.status === 'running'); return cur ? ` · ${cur.name_ar}` : ''; })()}
+                            </div>
+                            <div style={{ height: 5, background: '#dbe4ff', borderRadius: 3, overflow: 'hidden', margin: '6px 0' }}>
+                                <div style={{ height: '100%', width: `${job.total ? Math.round((job.completed / job.total) * 100) : 0}%`, background: '#1a56db', transition: 'width .3s' }} />
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
+                                يمكنك الانتقال إلى صفحات أخرى أو تصغير النافذة؛ سيستمر التقييم في الخلفية. لكن لا تُغلق التطبيق حتى ينتهي.
+                            </div>
+                        </div>
+                    )}
 
                     {/* filters */}
                     <div className="flex items-center gap-2" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
@@ -461,8 +535,8 @@ export default function Evaluations() {
                                 <span style={{ fontSize: 13, fontWeight: 700, color: s.pct != null ? scoreColor(s.pct) : 'var(--gray-400)' }}>
                                     {s.pct != null ? `${s.pct}%` : '—'}
                                 </span>
-                                <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); runAi(group.indicator.id); }} disabled={aiId === group.indicator.id}>
-                                    {aiId === group.indicator.id ? 'جاري التقييم...' : '🤖 تقييم آلي'}
+                                <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); runAi(group.indicator.id); }} disabled={jobRunning}>
+                                    {busyIndicatorIds.has(group.indicator.id) ? 'جاري التقييم...' : '🤖 تقييم آلي'}
                                 </button>
                             </div>
                         </div>
