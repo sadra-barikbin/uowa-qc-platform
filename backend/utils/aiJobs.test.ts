@@ -17,6 +17,9 @@ jest.mock('../models', () => ({
 jest.mock('./aiEvaluator', () => ({
     aiEvaluateIndicator: jest.fn(),
 }));
+jest.mock('./notifications', () => ({
+    notifyAiEvaluationComplete: jest.fn().mockResolvedValue(undefined),
+}));
 
 // A period whose active indicators are the given [id, name] pairs, shaped like the
 // EvaluationPeriod.findByPk(...) result aiJobs reads (period_indicators[].indicator).
@@ -53,12 +56,14 @@ function deferred<T>() {
 let aiJobs: typeof import('./aiJobs');
 let EvaluationPeriod: { findByPk: jest.Mock };
 let aiEvaluateIndicator: jest.Mock;
+let notifyAiEvaluationComplete: jest.Mock;
 
 beforeEach(() => {
     jest.resetModules();
     aiJobs = require('./aiJobs');
     ({ EvaluationPeriod } = require('../models'));
     ({ aiEvaluateIndicator } = require('./aiEvaluator'));
+    ({ notifyAiEvaluationComplete } = require('./notifications'));
 });
 
 describe('startAiJob', () => {
@@ -88,6 +93,11 @@ describe('startAiJob', () => {
         expect(aiEvaluateIndicator).toHaveBeenCalledWith('p1', 'd1', 'i3', 'u1');
         // Registry clears the running flag once finished.
         expect(aiJobs.anyAiJobRunning()).toBe(false);
+        // On completion the starter is notified exactly once, with the run's tallies.
+        expect(notifyAiEvaluationComplete).toHaveBeenCalledTimes(1);
+        expect(notifyAiEvaluationComplete).toHaveBeenCalledWith({
+            user_id: 'u1', period_id: 'p1', department_id: 'd1', evaluated: 3, skipped: 0, failed: 0,
+        });
     });
 
     test('grades only the requested subset', async () => {
@@ -159,6 +169,10 @@ describe('startAiJob', () => {
         expect(byId.i2.status).toBe('error');
         expect(byId.i2.error).toBe('boom');
         expect(done.evaluated).toHaveLength(2);  // only the successful indicators contributed
+        // The completion notification still fires, and reports the failed indicator count.
+        expect(notifyAiEvaluationComplete).toHaveBeenCalledWith(
+            expect.objectContaining({ evaluated: 2, failed: 1 }),
+        );
     });
 });
 

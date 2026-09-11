@@ -52,7 +52,7 @@ export default function Notifications() {
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 {!n.is_read && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--primary)', display: 'inline-block' }} />}
-                                <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>{new Date(n.created_at).toLocaleString('ar-IQ')}</span>
+                                <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>{new Date(n.createdAt || n.created_at).toLocaleString('ar-IQ')}</span>
                             </div>
                         </div>
                         {n.message_ar && <p style={{ fontSize: 13, color: 'var(--gray-600)', marginRight: 28 }}>{n.message_ar}</p>}

@@ -33,6 +33,45 @@ export async function sendDeadlineReminders(): Promise<void> {
     }
 }
 
+// Notify the user who started a background AI-evaluation run that it has finished. The run
+// happens server-side and the user may have navigated away (the in-page toast only fires if
+// they're still on the Evaluations page), so this leaves a durable, badge-counted record they
+// can find later. Reuses the existing `review_needed` type — its ✔ icon reads as "graded, look
+// it over". Best-effort: a notification failure must never fail the job, so callers don't await
+// this for correctness and it swallows its own errors.
+export async function notifyAiEvaluationComplete(args: {
+    user_id: string;
+    period_id: string;
+    department_id: string;
+    evaluated: number;   // criteria the AI scored
+    skipped: number;     // criteria skipped (no documents)
+    failed: number;      // indicators that errored out
+}): Promise<void> {
+    try {
+        const dept = await Department.findByPk(args.department_id);
+        const nameAr = dept?.name_ar || '';
+        const nameEn = dept?.name_en || '';
+        await Notification.create({
+            user_id: args.user_id,
+            department_id: args.department_id,
+            period_id: args.period_id,
+            type: 'review_needed',
+            priority: args.failed ? 'high' : 'normal',
+            title_en: `AI evaluation complete — ${nameEn}`,
+            title_ar: `اكتمل التقييم الآلي — ${nameAr}`,
+            message_en: `${args.evaluated} criteria scored`
+                + (args.skipped ? `, ${args.skipped} skipped (no documents)` : '')
+                + (args.failed ? ` · ${args.failed} indicator(s) failed` : ''),
+            message_ar: `تم تقييم ${args.evaluated} معياراً`
+                + (args.skipped ? `، وتُخطّي ${args.skipped} بلا مستندات` : '')
+                + (args.failed ? ` · فشل ${args.failed} مؤشر` : ''),
+            action_url: `/evaluations?period=${args.period_id}&department=${args.department_id}`,
+        });
+    } catch (err) {
+        console.error('notifyAiEvaluationComplete failed', err);
+    }
+}
+
 // notify QC staff that a department has unsubmitted criteria as the deadline nears
 export async function notifyMissingSubmissions(period_id: string): Promise<void> {
     const period = await EvaluationPeriod.findByPk(period_id);

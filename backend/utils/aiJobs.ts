@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { EvaluationPeriod, PeriodIndicator, Indicator } from '../models';
 import { aiEvaluateIndicator, AiEvaluationResult } from './aiEvaluator';
+import { notifyAiEvaluationComplete } from './notifications';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Background AI-evaluation jobs.
@@ -171,4 +172,15 @@ async function runJob(job: AiJob): Promise<void> {
     job.status = 'done';
     job.finished_at = new Date().toISOString();
     runningByScope.delete(scopeKey(job.period_id, job.department_id));
+
+    // Leave a durable notification for whoever started the run — they may have navigated away,
+    // so the in-page completion toast alone isn't enough. Best-effort; never fails the job.
+    await notifyAiEvaluationComplete({
+        user_id: job.evaluated_by,
+        period_id: job.period_id,
+        department_id: job.department_id,
+        evaluated: job.evaluated.length,
+        skipped: job.skipped.length,
+        failed: job.indicators.filter(i => i.status === 'error').length,
+    });
 }
