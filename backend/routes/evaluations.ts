@@ -6,6 +6,7 @@ import {
 import { authenticate, authorize } from '../middleware/auth';
 import { getIndicatorScores, getDepartmentScores, getCollegeScores } from '../utils/scores';
 import { aiEvaluateIndicator } from '../utils/aiEvaluator';
+import { gatePeriod, EVALUATION_STATES } from '../utils/periodGuard';
 import { startAiJob, getAiJob, getLatestAiJob } from '../utils/aiJobs';
 
 // score a 'ratio' criterion from raw numbers, capped at 1
@@ -82,6 +83,8 @@ router.post('/', authenticate, authorize('admin', 'qc_head'), async (req: Reques
     if (!period_id || !department_id || !criterion_id) {
         return res.status(400).json({ error: 'period_id, department_id, criterion_id are required' });
     }
+    const gate = await gatePeriod(period_id, EVALUATION_STATES, 'evaluation');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
 
     const criterion = await IndicatorCriterion.findByPk(criterion_id);
     if (!criterion) return res.status(404).json({ error: 'Criterion not found' });
@@ -119,6 +122,8 @@ router.post('/ai', authenticate, authorize('admin', 'qc_head'), async (req: Requ
     if (!period_id || !department_id || !indicator_id) {
         return res.status(400).json({ error: 'period_id, department_id, indicator_id are required' });
     }
+    const gate = await gatePeriod(period_id, EVALUATION_STATES, 'evaluation');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
     try {
         const result = await aiEvaluateIndicator(period_id, department_id, indicator_id, req.user!.id);
         res.json(result);
@@ -141,6 +146,8 @@ router.post('/ai/jobs', authenticate, authorize('admin', 'qc_head'), async (req:
     if (!period_id || !department_id) {
         return res.status(400).json({ error: 'period_id and department_id are required' });
     }
+    const gate = await gatePeriod(period_id, EVALUATION_STATES, 'evaluation');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
     try {
         const job = await startAiJob({ period_id, department_id, indicator_ids, evaluatedBy: req.user!.id });
         res.status(201).json({ job });

@@ -28,6 +28,11 @@ const STATUS = {
     reviewed: { dot: '#0e9f6e', label: 'تمت مراجعته' },
 };
 
+// Period-status labels (mirror of the backend). Evidence can only be uploaded while the
+// period is `open`; every other state is read-only here — the backend enforces the same rule.
+const PERIOD_STATUS_LABEL = { draft: 'مسودة', open: 'مفتوحة للرفع', under_review: 'قيد المراجعة', published: 'منشورة', closed: 'مغلقة' };
+const UPLOAD_STATE = 'open';
+
 // Per-indicator rollup: how many criteria have evidence, plus the worst status for the index dot.
 function indicatorStats(group) {
     let uploaded = 0, empty = 0, revision = 0;
@@ -95,6 +100,10 @@ export default function Submissions() {
 
     useEffect(() => { loadMatrix(); }, [loadMatrix]);
 
+    // Evidence upload is gated by the period's state — enabled only while it is `open`.
+    const selectedPeriod = periods.find(p => p.id === selPeriod) || null;
+    const canUpload = selectedPeriod?.status === UPLOAD_STATE;
+
     const updateRow = (criterionId, patch) => setRowState(prev => ({ ...prev, [criterionId]: { ...prev[criterionId], ...patch } }));
 
     // Replace one criterion's submission in local state (no full reload → no flash, accordions
@@ -116,6 +125,7 @@ export default function Submissions() {
     };
 
     const saveRow = async (criterionId, submissionId) => {
+        if (!canUpload) return;
         const state = rowState[criterionId] || {};
         setSavingId(criterionId);
         try {
@@ -145,6 +155,7 @@ export default function Submissions() {
     };
 
     const removeDoc = async (criterionId, docId) => {
+        if (!canUpload) return;
         if (!window.confirm('حذف هذا الملف؟')) return;
         try {
             await submissionsAPI.deleteDocument(docId);
@@ -207,6 +218,12 @@ export default function Submissions() {
                     </div>
                 </div>
             </div>
+
+            {selPeriod && selDept && selectedPeriod && !canUpload && (
+                <div className="card" style={{ marginBottom: 16, padding: '12px 16px', background: '#fdf6e3', border: '1px solid #f0c674', color: '#8a6d1b', fontSize: 13 }}>
+                    🔒 رفع المستندات متاح فقط عندما تكون الفترة في حالة «{PERIOD_STATUS_LABEL[UPLOAD_STATE]}». الحالة الحالية: «{PERIOD_STATUS_LABEL[selectedPeriod.status] || selectedPeriod.status}» — العرض للاطّلاع فقط.
+                </div>
+            )}
 
             {loading && <div className="flex items-center justify-center" style={{ height: 120 }}><div className="spinner" /></div>}
 
@@ -287,6 +304,7 @@ export default function Submissions() {
                                                 placeholder="ملاحظات توضيحية (اختياري)..."
                                                 value={state.notes || ''}
                                                 onChange={e => updateRow(criterion.id, { notes: e.target.value })}
+                                                disabled={!canUpload}
                                             />
                                             {submission?.documents?.length > 0 && (
                                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
@@ -296,7 +314,7 @@ export default function Submissions() {
                                                             <span>{doc.file_name}</span>
                                                             <span style={{ color: 'var(--gray-400)' }}>{formatSize(doc.size_bytes)}</span>
                                                             <button className="btn btn-ghost btn-sm" style={{ padding: '1px 6px' }} onClick={() => download(doc)}>تنزيل</button>
-                                                            <button className="btn btn-ghost btn-sm" style={{ padding: '1px 6px', color: 'var(--danger)' }} onClick={() => removeDoc(criterion.id, doc.id)}>حذف</button>
+                                                            {canUpload && <button className="btn btn-ghost btn-sm" style={{ padding: '1px 6px', color: 'var(--danger)' }} onClick={() => removeDoc(criterion.id, doc.id)}>حذف</button>}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -305,8 +323,9 @@ export default function Submissions() {
                                                 <input
                                                     key={`file-${criterion.id}-${submission?.documents?.length || 0}`}
                                                     type="file" multiple onChange={e => updateRow(criterion.id, { files: Array.from(e.target.files || []) })} style={{ fontSize: 12 }}
+                                                    disabled={!canUpload}
                                                 />
-                                                <button className="btn btn-primary btn-sm" onClick={() => saveRow(criterion.id, submission?.id)} disabled={savingId === criterion.id || !rowDirty(criterion, submission)}>
+                                                <button className="btn btn-primary btn-sm" onClick={() => saveRow(criterion.id, submission?.id)} disabled={!canUpload || savingId === criterion.id || !rowDirty(criterion, submission)}>
                                                     {savingId === criterion.id ? 'جاري الحفظ...' : 'حفظ'}
                                                 </button>
                                             </div>

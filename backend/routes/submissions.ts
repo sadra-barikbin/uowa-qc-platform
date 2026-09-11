@@ -7,6 +7,7 @@ import {
     DepartmentUser, EvaluationPeriod, PeriodIndicator, User,
 } from '../models';
 import { authenticate, authorize } from '../middleware/auth';
+import { gatePeriod, SUBMISSION_STATES } from '../utils/periodGuard';
 
 const router = Router();
 
@@ -95,6 +96,8 @@ router.post('/', authenticate, authorize('admin', 'qc_head', 'dept_rep'), async 
         return res.status(400).json({ error: 'period_id, department_id, criterion_id are required' });
     }
     if (!(await assertDepartmentAccess(req, department_id))) return res.status(403).json({ error: 'Not assigned to this department' });
+    const gate = await gatePeriod(period_id, SUBMISSION_STATES, 'submission');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
 
     const [submission, created] = await Submission.findOrCreate({
         where: { period_id, department_id, criterion_id },
@@ -109,6 +112,8 @@ router.post('/:id/documents', authenticate, authorize('admin', 'qc_head', 'dept_
     const submission = await Submission.findByPk(req.params.id);
     if (!submission) return res.status(404).json({ error: 'Submission not found' });
     if (!(await assertDepartmentAccess(req, submission.department_id))) return res.status(403).json({ error: 'Not assigned to this department' });
+    const gate = await gatePeriod(submission.period_id, SUBMISSION_STATES, 'submission');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
     const files = req.files as Express.Multer.File[] | undefined;
     if (!files?.length) return res.status(400).json({ error: 'No files uploaded' });
 
@@ -136,6 +141,8 @@ router.delete('/documents/:docId', authenticate, authorize('admin', 'qc_head', '
     const doc = await SubmissionDocument.findByPk(req.params.docId, { include: [{ model: Submission, as: 'submission' }] });
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     if (!(await assertDepartmentAccess(req, doc.submission!.department_id))) return res.status(403).json({ error: 'Not assigned to this department' });
+    const gate = await gatePeriod(doc.submission!.period_id, SUBMISSION_STATES, 'submission');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
 
     if (doc.storage_provider === 'local') {
         const filePath = path.join(uploadDir, doc.storage_path);

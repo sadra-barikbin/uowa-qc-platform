@@ -32,6 +32,11 @@ const STATUS = {
     done: { dot: '#0e9f6e', label: 'مكتمل' },
 };
 
+// Period-status labels (mirror of the backend). Scoring is only permitted while the period
+// is `under_review`; every other state is read-only here — the backend enforces the same rule.
+const PERIOD_STATUS_LABEL = { draft: 'مسودة', open: 'مفتوحة للرفع', under_review: 'قيد المراجعة', published: 'منشورة', closed: 'مغلقة' };
+const EVAL_STATE = 'under_review';
+
 // Per-indicator rollup: counts + weighted % (unscored counts as 0 once anything is scored).
 function indicatorStats(group) {
     let scored = 0, aiPending = 0, low = 0, wsum = 0, wnum = 0, any = false;
@@ -115,6 +120,10 @@ export default function Evaluations() {
 
     useEffect(() => { loadMatrix(); }, [loadMatrix]);
 
+    // Scoring is gated by the period's state — enabled only while it is `under_review`.
+    const selectedPeriod = periods.find(p => p.id === selPeriod) || null;
+    const canEvaluate = selectedPeriod?.status === EVAL_STATE;
+
     // Reconnect to a running job when the period/department changes (or on first load), so
     // returning to this page mid-run shows live progress instead of a dead button. Finished
     // jobs are already reflected by loadMatrix, so we only observe running ones.
@@ -194,6 +203,7 @@ export default function Evaluations() {
     const aiEvalToEvaluation = e => ({ score: e.score, evaluation_method: 'ai', ai_confidence: e.confidence, ai_rationale: e.rationale, reviewer_notes: e.rationale, raw_values: {} });
 
     const saveRow = async (criterion, submissionId) => {
+        if (!canEvaluate) return;
         const state = rowState[criterion.id] || {};
         const payload = { period_id: selPeriod, department_id: selDept, criterion_id: criterion.id, submission_id: submissionId, reviewer_notes: state.notes };
         if (criterion.criterion_type === 'ratio') {
@@ -224,6 +234,7 @@ export default function Evaluations() {
 
     // Accept one AI suggestion as-is.
     const acceptAi = async (criterion, evaluation, submissionId) => {
+        if (!canEvaluate) return;
         setSavingId(criterion.id);
         try {
             const res = await evaluationsAPI.save(aiAcceptPayload(criterion, evaluation, submissionId));
@@ -235,7 +246,7 @@ export default function Evaluations() {
 
     // Accept every AI/low-confidence suggestion across the department at once.
     const acceptAllAi = async () => {
-        if (acceptingAll) return;
+        if (!canEvaluate || acceptingAll) return;
         const targets = [];
         matrix.forEach(g => g.criteria.forEach(({ criterion, submission, evaluation }) => {
             const st = critStatus(evaluation);
@@ -286,6 +297,7 @@ export default function Evaluations() {
     // Start a background job (a single indicator, or all when indicatorIds is undefined). The
     // backend runs the loop; the polling effect above drives progress from here.
     const startJob = async (indicatorIds) => {
+        if (!canEvaluate) return; // scoring gated to `under_review` (backend enforces the same)
         if (job?.status === 'running') { toast('التقييم الآلي قيد التنفيذ بالفعل'); return; }
         try {
             const r = await evaluationsAPI.startAiJob({ period_id: selPeriod, department_id: selDept, indicator_ids: indicatorIds });
@@ -330,11 +342,11 @@ export default function Evaluations() {
                 <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
                     <div>
                         <label className="form-hint">{criterion.config?.numerator_label_ar || 'البسط'}</label>
-                        <input type="number" className="form-input" style={{ width: 100 }} value={state.numerator} onChange={e => updateRow(criterion.id, { numerator: e.target.value })} />
+                        <input type="number" className="form-input" style={{ width: 100 }} value={state.numerator} onChange={e => updateRow(criterion.id, { numerator: e.target.value })} disabled={!canEvaluate} />
                     </div>
                     <div>
                         <label className="form-hint">{criterion.config?.denominator_label_ar || 'المقام'}</label>
-                        <input type="number" className="form-input" style={{ width: 100 }} value={state.denominator} onChange={e => updateRow(criterion.id, { denominator: e.target.value })} />
+                        <input type="number" className="form-input" style={{ width: 100 }} value={state.denominator} onChange={e => updateRow(criterion.id, { denominator: e.target.value })} disabled={!canEvaluate} />
                     </div>
                     {preview != null && <span style={{ fontSize: 13, fontWeight: 600, color: scoreColor(preview) }}>= {preview}%</span>}
                 </div>
@@ -342,7 +354,7 @@ export default function Evaluations() {
         }
         if (criterion.criterion_type === 'binary') {
             return (
-                <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}>
+                <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })} disabled={!canEvaluate}>
                     <option value="">لم يُقيَّم</option>
                     <option value="100">نعم — مستوفٍ</option>
                     <option value="0">لا — غير مستوفٍ</option>
@@ -351,7 +363,7 @@ export default function Evaluations() {
         }
         if (criterion.criterion_type === 'checklist') {
             return (
-                <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}>
+                <select className="form-select" style={{ width: 'auto' }} value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })} disabled={!canEvaluate}>
                     <option value="">لم يُقيَّم</option>
                     <option value="0">لم يتم (0%)</option>
                     <option value="50">مكتمل جزئياً (50%)</option>
@@ -364,7 +376,7 @@ export default function Evaluations() {
                 <input
                     type="number" min="0" max="100" className="form-input" style={{ paddingLeft: 28, textAlign: 'center' }}
                     value={state.percent} onChange={e => updateRow(criterion.id, { percent: e.target.value })}
-                    placeholder="0-100%"
+                    placeholder="0-100%" disabled={!canEvaluate}
                 />
                 <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)', fontSize: 13 }}>%</span>
             </div>
@@ -435,6 +447,12 @@ export default function Evaluations() {
                 </div>
             </div>
 
+            {selPeriod && selDept && selectedPeriod && !canEvaluate && (
+                <div className="card" style={{ marginBottom: 16, padding: '12px 16px', background: '#fdf6e3', border: '1px solid #f0c674', color: '#8a6d1b', fontSize: 13 }}>
+                    🔒 التقييم متاح فقط عندما تكون الفترة في حالة «{PERIOD_STATUS_LABEL[EVAL_STATE]}». الحالة الحالية: «{PERIOD_STATUS_LABEL[selectedPeriod.status] || selectedPeriod.status}» — العرض للاطّلاع فقط.
+                </div>
+            )}
+
             {loading && <div className="flex items-center justify-center" style={{ height: 120 }}><div className="spinner" /></div>}
 
             {/* Sticky summary + jump index + filters */}
@@ -453,11 +471,11 @@ export default function Evaluations() {
                         </div>
                         <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
                             {(overall.aiPending + overall.low) > 0 && (
-                                <button className="btn btn-sm" style={{ background: '#0e9f6e', color: '#fff' }} onClick={acceptAllAi} disabled={acceptingAll || jobRunning}>
+                                <button className="btn btn-sm" style={{ background: '#0e9f6e', color: '#fff' }} onClick={acceptAllAi} disabled={!canEvaluate || acceptingAll || jobRunning}>
                                     {acceptingAll ? 'جاري الاعتماد...' : `✓ اعتماد كل الآلي (${overall.aiPending + overall.low})`}
                                 </button>
                             )}
-                            <button className="btn btn-secondary btn-sm" onClick={runAllAi} disabled={jobRunning}>
+                            <button className="btn btn-secondary btn-sm" onClick={runAllAi} disabled={!canEvaluate || jobRunning}>
                                 {jobRunning ? `جاري التقييم الآلي... (${job.completed}/${job.total})` : '🤖 تقييم آلي للكل'}
                             </button>
                         </div>
@@ -544,7 +562,7 @@ export default function Evaluations() {
                                 <span style={{ fontSize: 13, fontWeight: 700, color: s.pct != null ? scoreColor(s.pct) : 'var(--gray-400)' }}>
                                     {s.pct != null ? `${s.pct}%` : '—'}
                                 </span>
-                                <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); runAi(group.indicator.id); }} disabled={jobRunning}>
+                                <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); runAi(group.indicator.id); }} disabled={!canEvaluate || jobRunning}>
                                     {busyIndicatorIds.has(group.indicator.id) ? 'جاري التقييم...' : '🤖 تقييم آلي'}
                                 </button>
                             </div>
@@ -596,11 +614,11 @@ export default function Evaluations() {
                                                 {renderScoreInput(criterion)}
                                                 <div className="flex items-center gap-2">
                                                     {isAi && (
-                                                        <button className="btn btn-sm" style={{ background: '#0e9f6e', color: '#fff' }} onClick={() => acceptAi(criterion, evaluation, submission?.id)} disabled={savingId === criterion.id}>
+                                                        <button className="btn btn-sm" style={{ background: '#0e9f6e', color: '#fff' }} onClick={() => acceptAi(criterion, evaluation, submission?.id)} disabled={!canEvaluate || savingId === criterion.id}>
                                                             ✓ اعتماد
                                                         </button>
                                                     )}
-                                                    <button className="btn btn-primary btn-sm" onClick={() => saveRow(criterion, submission?.id)} disabled={savingId === criterion.id || !rowComplete(criterion) || !rowDirty(criterion, evaluation)}>
+                                                    <button className="btn btn-primary btn-sm" onClick={() => saveRow(criterion, submission?.id)} disabled={!canEvaluate || savingId === criterion.id || !rowComplete(criterion) || !rowDirty(criterion, evaluation)}>
                                                         {savingId === criterion.id ? 'جاري الحفظ...' : (isAi ? 'تعديل وحفظ' : 'حفظ التقييم')}
                                                     </button>
                                                 </div>
@@ -610,6 +628,7 @@ export default function Evaluations() {
                                                 placeholder="ملاحظات المراجع (اختياري)..."
                                                 value={rowState[criterion.id]?.notes || ''}
                                                 onChange={e => updateRow(criterion.id, { notes: e.target.value })}
+                                                disabled={!canEvaluate}
                                             />
                                         </div>
                                     );
