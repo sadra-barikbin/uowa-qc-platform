@@ -76,6 +76,11 @@ export const evaluationsAPI = {
     matrix: (params) => api.get('/evaluations/matrix', { params }),
     save: (data) => api.post('/evaluations', data),
     ai: (data) => api.post('/evaluations/ai', data),
+    // Background AI-evaluation jobs: start one (all indicators, or a subset via
+    // { indicator_ids }), reconnect to the latest for a department, or poll one by id.
+    startAiJob: (data) => api.post('/evaluations/ai/jobs', data),
+    activeAiJob: (params) => api.get('/evaluations/ai/jobs/active', { params }),
+    getAiJob: (id) => api.get(`/evaluations/ai/jobs/${id}`),
     scoresIndicators: (params) => api.get('/evaluations/scores/indicators', { params }),
     scoresDepartments: (params) => api.get('/evaluations/scores/departments', { params }),
     scoresColleges: (params) => api.get('/evaluations/scores/colleges', { params }),

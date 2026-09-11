@@ -7,6 +7,7 @@ import { authenticate, authorize } from '../middleware/auth';
 import { getIndicatorScores, getDepartmentScores, getCollegeScores } from '../utils/scores';
 import { aiEvaluateIndicator } from '../utils/aiEvaluator';
 import { gatePeriod, EVALUATION_STATES } from '../utils/periodGuard';
+import { startAiJob, getAiJob, getLatestAiJob } from '../utils/aiJobs';
 
 // score a 'ratio' criterion from raw numbers, capped at 1
 function computeRatioScore(raw_values: { numerator?: number; denominator?: number } | undefined): number | null {
@@ -130,6 +131,46 @@ router.post('/ai', authenticate, authorize('admin', 'qc_head'), async (req: Requ
         const status = (err as { status?: number }).status || 500;
         res.status(status).json({ error: (err as Error).message });
     }
+});
+
+// ── Background AI-evaluation jobs ─────────────────────────────
+// The server orchestrates the per-indicator loop and the UI observes it, so a run
+// survives page navigation / minimize instead of dying with the page's JS.
+
+// POST /api/evaluations/ai/jobs — start a background job for one or more indicators
+// ({ indicator_ids } omitted → every active indicator for the period).
+router.post('/ai/jobs', authenticate, authorize('admin', 'qc_head'), async (req: Request, res: Response) => {
+    const { period_id, department_id, indicator_ids } = req.body as {
+        period_id?: string; department_id?: string; indicator_ids?: string[];
+    };
+    if (!period_id || !department_id) {
+        return res.status(400).json({ error: 'period_id and department_id are required' });
+    }
+    const gate = await gatePeriod(period_id, EVALUATION_STATES, 'evaluation');
+    if (!gate.ok) return res.status(gate.code).json({ error: gate.error });
+    try {
+        const job = await startAiJob({ period_id, department_id, indicator_ids, evaluatedBy: req.user!.id });
+        res.status(201).json({ job });
+    } catch (err) {
+        const status = (err as { status?: number }).status || 500;
+        res.status(status).json({ error: (err as Error).message });
+    }
+});
+
+// GET /api/evaluations/ai/jobs/active?period_id=&department_id= — the latest job for a
+// department (running or recently finished), so the page can reconnect after navigating away.
+// Registered before /ai/jobs/:id so 'active' isn't captured as an id.
+router.get('/ai/jobs/active', authenticate, authorize('admin', 'qc_head'), (req: Request, res: Response) => {
+    const { period_id, department_id } = req.query as Record<string, string | undefined>;
+    if (!period_id || !department_id) return res.status(400).json({ error: 'period_id and department_id are required' });
+    res.json({ job: getLatestAiJob(period_id, department_id) || null });
+});
+
+// GET /api/evaluations/ai/jobs/:id — poll one job's progress
+router.get('/ai/jobs/:id', authenticate, authorize('admin', 'qc_head'), (req: Request, res: Response) => {
+    const job = getAiJob(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    res.json({ job });
 });
 
 // GET /api/evaluations/scores/indicators?period_id=&department_id=

@@ -41,6 +41,7 @@ if (SENTRY_DSN) Sentry.init({ dsn: SENTRY_DSN, environment: app.isPackaged ? 'pr
 // ─────────────────────────────────────────────────────────────────────────────
 
 let backendChild = null;
+let backendPort = null; // set once the backend is healthy; used by the close-warning health check
 let mainWindow = null;
 
 const userData = app.getPath('userData');
@@ -271,7 +272,24 @@ async function startBackend() {
     log('waiting for backend health…');
     await waitForHealth(appPort);
     log('backend healthy');
+    backendPort = appPort;
     return appPort;
+}
+
+// Ask the backend whether a background AI evaluation is in flight, so we can warn before the
+// window closes (closing kills the backend child and aborts the run). Fails safe to "not
+// running" — a health hiccup must never trap the user in an un-closable window.
+function fetchAiRunning() {
+    return new Promise((resolve) => {
+        if (!backendPort || !backendChild) return resolve(false);
+        const req = http.get({ host: '127.0.0.1', port: backendPort, path: '/api/health', timeout: 2000 }, (res) => {
+            let body = '';
+            res.on('data', (d) => { body += d; });
+            res.on('end', () => { try { resolve(!!JSON.parse(body).aiRunning); } catch { resolve(false); } });
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
 }
 
 function stopBackend() {
@@ -306,6 +324,32 @@ function createWindow() {
         '</body></html>';
     mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(loadingHtml));
     mainWindow.once('ready-to-show', () => mainWindow.show());
+
+    // Warn before closing while a background AI evaluation is running — the backend is a child
+    // of this process, so closing aborts the run (completed indicators are already saved; the
+    // rest are lost). This covers both the window's X and app quit (which closes the window):
+    // backend teardown was moved off `before-quit` to window-all-closed so the health check
+    // below still reaches a live backend. Fails open — any error just lets the window close.
+    let forceClose = false;
+    mainWindow.on('close', (e) => {
+        if (forceClose) return;
+        e.preventDefault();
+        fetchAiRunning().then((running) => {
+            if (!running) { forceClose = true; if (mainWindow) mainWindow.close(); return; }
+            const choice = dialog.showMessageBoxSync(mainWindow, {
+                type: 'warning',
+                buttons: ['البقاء والانتظار', 'إغلاق وإيقاف التقييم'],
+                defaultId: 0,
+                cancelId: 0,
+                noLink: true,
+                title: 'التقييم الآلي قيد التنفيذ',
+                // Pure Arabic (no embedded Latin) so the native RTL task dialog doesn't reorder runs.
+                message: 'التقييم الآلي قيد التنفيذ',
+                detail: 'إغلاق التطبيق الآن سيوقف التقييم الآلي وستفقد المؤشرات التي لم تكتمل بعد. المؤشرات المكتملة محفوظة. هل تريد الإغلاق على أي حال؟',
+            });
+            if (choice === 1) { forceClose = true; if (mainWindow) mainWindow.close(); }
+        }).catch(() => { forceClose = true; if (mainWindow) mainWindow.close(); });
+    });
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -429,5 +473,8 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     app.on('window-all-closed', () => { app.isQuitting = true; stopBackend(); app.quit(); });
-    app.on('before-quit', () => { app.isQuitting = true; stopBackend(); });
+    // Only flag the intent to quit here — the actual backend teardown happens in
+    // window-all-closed (after the window's close handler has run). Killing the backend here
+    // would race the close-warning's health check, which needs a live backend to answer.
+    app.on('before-quit', () => { app.isQuitting = true; });
 }
