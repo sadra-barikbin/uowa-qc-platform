@@ -21,12 +21,18 @@ All backend commands run from `backend/`:
 npm install
 npm run dev         # ts-node-dev, hot reload, http://localhost:5000
 npm run typecheck   # tsc --noEmit — run this after any backend change
+npm test            # jest — unit tests for pure orchestration logic (see below)
 npm run build       # compiles to dist/
 npm start           # node dist/server.js (run build first)
 npm run seed        # ts-node utils/seedData.ts — DROPS AND RECREATES ALL TABLES (sequelize.sync({force:true}))
 ```
 
-There is no test suite in this repo (no jest/mocha/vitest configured) — don't invent test commands.
+The only automated tests are Jest unit tests for pure, self-contained orchestration logic (currently
+`backend/utils/aiJobs.test.ts`, co-located as `*.test.ts` per `backend/jest.config.js`). They mock `../models`
+and `./aiEvaluator`, so nothing touches Postgres or the Anthropic API — there's no integration/e2e suite, and
+routes, views, and the frontend are still verified by typecheck/build plus manual browser testing. Add a
+`*.test.ts` next to any similarly pure module you introduce; don't reach for tests that would need a live DB.
+CI (`.github/workflows/ci.yml`) runs backend `typecheck` + `test` and the frontend `build` on every PR.
 
 Frontend, from `frontend/`: `npm install`, `npm start` (proxies `/api` to `localhost:5000`), `npm run build`.
 

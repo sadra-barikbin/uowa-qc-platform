@@ -8,6 +8,7 @@
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "jest",
     "seed": "ts-node utils/seedData.ts",
     "sentry:sourcemaps": "node scripts/sentry-sourcemaps.js"
   },
@@ -46,9 +47,12 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^22.20.1",
     "@types/node-cron": "^3.0.11",
+    "@types/jest": "^29.5.14",
     "@types/pdfkit": "^0.17.6",
     "@types/uuid": "^10.0.0",
+    "jest": "^29.7.0",
     "sequelize-cli": "^6.6.5",
+    "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"

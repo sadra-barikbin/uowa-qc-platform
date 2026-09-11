@@ -10,7 +10,7 @@ export type PeriodStatus = 'draft' | 'open' | 'under_review' | 'published' | 'cl
 export type SubmissionStatus = 'pending' | 'submitted' | 'needs_revision' | 'reviewed';
 export type StorageProvider = 'local' | 'google_drive';
 export type EvaluationMethod = 'manual' | 'ai';
-export type NotificationType = 'missing_submission' | 'deadline' | 'review_needed' | 'system' | 'reminder';
+export type NotificationType = 'missing_submission' | 'deadline' | 'review_needed' | 'evaluation_complete' | 'system' | 'reminder';
 
 // ── User ──────────────────────────────────────────────────────
 export class User extends Model<InferAttributes<User>, InferCreationAttributes<User>> {
@@ -330,7 +330,7 @@ Notification.init({
     user_id:     { type: DataTypes.UUID, allowNull: false },
     department_id: { type: DataTypes.UUID },
     period_id:   { type: DataTypes.UUID },
-    type:        { type: DataTypes.ENUM('missing_submission', 'deadline', 'review_needed', 'system', 'reminder'), allowNull: false },
+    type:        { type: DataTypes.ENUM('missing_submission', 'deadline', 'review_needed', 'evaluation_complete', 'system', 'reminder'), allowNull: false },
     title_en:    { type: DataTypes.STRING(500), allowNull: false },
     title_ar:    { type: DataTypes.STRING(500) },
     message_en:  { type: DataTypes.TEXT },
