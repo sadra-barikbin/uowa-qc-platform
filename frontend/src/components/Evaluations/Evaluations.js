@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { departmentsAPI, periodsAPI, submissionsAPI, evaluationsAPI } from '../../utils/api';
+import usePersistentState from '../../hooks/usePersistentState';
 
 const scoreColor = s => s >= 90 ? '#0e9f6e' : s >= 70 ? '#1a56db' : s >= 50 ? '#c27803' : '#e02424';
 const LOW_CONF = 0.8; // AI scores under this confidence are flagged for a closer look
@@ -52,8 +53,10 @@ export default function Evaluations() {
     const [searchParams] = useSearchParams();
     const [periods, setPeriods] = useState([]);
     const [departments, setDepartments] = useState([]);
-    const [selPeriod, setSelPeriod] = useState(searchParams.get('period') || '');
-    const [selDept, setSelDept] = useState(searchParams.get('department') || '');
+    // Sticky across navigation: returning to this page keeps the last period/department
+    // (a deep link's ?period=&department= still wins). See usePersistentState.
+    const [selPeriod, setSelPeriod] = usePersistentState('eval:period', searchParams.get('period'));
+    const [selDept, setSelDept] = usePersistentState('eval:department', searchParams.get('department'));
     const [matrix, setMatrix] = useState([]);
     const [rowState, setRowState] = useState({}); // criterion_id -> { percent, numerator, denominator, notes }
     const [savingId, setSavingId] = useState(null);
@@ -70,9 +73,15 @@ export default function Evaluations() {
         periodsAPI.list().then(r => {
             const ps = r.data.periods || [];
             setPeriods(ps);
-            if (!selPeriod && ps[0]) setSelPeriod(ps[0].id);
+            // Keep a valid remembered/deep-linked period; otherwise fall back to the latest.
+            setSelPeriod(cur => (cur && ps.some(p => p.id === cur)) ? cur : (ps[0]?.id || ''));
         }).catch(() => {});
-        departmentsAPI.list().then(r => setDepartments(r.data.departments || [])).catch(() => {});
+        departmentsAPI.list().then(r => {
+            const ds = r.data.departments || [];
+            setDepartments(ds);
+            // Drop a remembered department that no longer exists so the picker isn't stuck on it.
+            setSelDept(cur => (cur && ds.some(d => d.id === cur)) ? cur : '');
+        }).catch(() => {});
     }, []);
 
     const loadMatrix = useCallback(() => {

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { departmentsAPI, periodsAPI, submissionsAPI } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
+import usePersistentState from '../../hooks/usePersistentState';
 
 function formatSize(bytes) {
     if (!bytes) return '';
@@ -45,8 +46,10 @@ export default function Submissions() {
     const [searchParams] = useSearchParams();
     const [periods, setPeriods] = useState([]);
     const [departments, setDepartments] = useState([]);
-    const [selPeriod, setSelPeriod] = useState(searchParams.get('period') || '');
-    const [selDept, setSelDept] = useState(searchParams.get('department') || '');
+    // Sticky across navigation: returning to this page keeps the last period/department
+    // (a deep link's ?period=&department= still wins). See usePersistentState.
+    const [selPeriod, setSelPeriod] = usePersistentState('subm:period', searchParams.get('period'));
+    const [selDept, setSelDept] = usePersistentState('subm:department', searchParams.get('department'));
     const [matrix, setMatrix] = useState([]);
     const [rowState, setRowState] = useState({}); // criterion_id -> { notes, files }
     const [savingId, setSavingId] = useState(null);
@@ -60,13 +63,15 @@ export default function Submissions() {
         periodsAPI.list().then(r => {
             const ps = r.data.periods || [];
             setPeriods(ps);
-            if (!selPeriod && ps[0]) setSelPeriod(ps[0].id);
+            // Keep a valid remembered/deep-linked period; otherwise fall back to the latest.
+            setSelPeriod(cur => (cur && ps.some(p => p.id === cur)) ? cur : (ps[0]?.id || ''));
         }).catch(() => {});
         departmentsAPI.list().then(r => {
             const all = r.data.departments || [];
             const mine = can('admin', 'qc_head') ? all : all.filter(d => d.representatives?.some(rep => rep.id === user.id));
             setDepartments(mine);
-            if (!selDept && mine.length === 1) setSelDept(mine[0].id);
+            // Keep a valid remembered department; else auto-pick when the user has exactly one.
+            setSelDept(cur => (cur && mine.some(d => d.id === cur)) ? cur : (mine.length === 1 ? mine[0].id : ''));
         }).catch(() => {});
     }, []);
 
