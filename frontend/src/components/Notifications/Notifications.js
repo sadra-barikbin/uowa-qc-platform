@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { notificationsAPI } from '../../utils/api';
 
-const TYPE_ICON = { missing_submission: '⚠', deadline: '⏰', review_needed: '✔', system: 'ℹ', reminder: '🔔' };
-const TYPE_BADGE = { missing_submission: 'badge-danger', deadline: 'badge-warning', review_needed: 'badge-success', system: 'badge-gray', reminder: 'badge-primary' };
-const TYPE_LABEL = { missing_submission: 'مستندات ناقصة', deadline: 'موعد نهائي', review_needed: 'بانتظار المراجعة', system: 'نظام', reminder: 'تذكير' };
+const TYPE_ICON = { missing_submission: '⚠', deadline: '⏰', review_needed: '✔', evaluation_complete: '🤖', system: 'ℹ', reminder: '🔔' };
+const TYPE_BADGE = { missing_submission: 'badge-danger', deadline: 'badge-warning', review_needed: 'badge-success', evaluation_complete: 'badge-primary', system: 'badge-gray', reminder: 'badge-primary' };
+const TYPE_LABEL = { missing_submission: 'مستندات ناقصة', deadline: 'موعد نهائي', review_needed: 'بانتظار المراجعة', evaluation_complete: 'اكتمل التقييم الآلي', system: 'نظام', reminder: 'تذكير' };
 const PRIORITY_COLOR = { urgent: '#e02424', high: '#c27803', normal: 'var(--gray-500)', low: 'var(--gray-400)' };
 
 export default function Notifications() {

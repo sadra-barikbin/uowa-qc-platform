@@ -195,7 +195,7 @@ CREATE TABLE evaluations (
 -- ============================================================
 -- NOTIFICATIONS
 -- ============================================================
-CREATE TYPE notification_type AS ENUM ('missing_submission', 'deadline', 'review_needed', 'system', 'reminder');
+CREATE TYPE notification_type AS ENUM ('missing_submission', 'deadline', 'review_needed', 'evaluation_complete', 'system', 'reminder');
 
 CREATE TABLE notifications (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
