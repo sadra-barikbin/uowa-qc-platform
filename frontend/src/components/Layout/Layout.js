@@ -11,7 +11,7 @@ const NAV = [
     { to: '/evaluations', icon: '✔', label: 'المراجعة والتقييم', roles: ['admin', 'qc_head'] },
     { to: '/periods', icon: '⧗', label: 'الفترات التقييمية', roles: ['admin'] },
     { to: '/indicators', icon: '☰', label: 'المؤشرات والمعايير', roles: ['admin'] },
-    { to: '/analytics', icon: '⊿', label: 'التحليلات والتقارير' },
+    { to: '/analytics', icon: '⊿', label: 'التحليلات والتقارير', roles: ['admin', 'qc_head'] },
     { to: '/notifications', icon: '⌚', label: 'الإشعارات', badge: true },
     { to: '/users', icon: '⊙', label: 'المستخدمون', roles: ['admin'] },
     { to: '/settings', icon: '⚙', label: 'إعدادات التقييم الآلي', roles: ['admin'] },

@@ -6,6 +6,17 @@ import { reportsAPI, periodsAPI, dashboardAPI } from '../../utils/api';
 
 ChartJS.register(RadialLinearScale, CategoryScale, LinearScale, BarElement, PointElement, LineElement, Filler, Tooltip, Legend);
 
+// Pull the server's Content-Disposition filename (prefer the UTF-8 `filename*` form for the
+// Arabic period label) so the download matches what the backend named it, not a generic report.xlsx.
+function filenameFromResponse(res, fallback) {
+    const cd = res.headers?.['content-disposition'];
+    if (!cd) return fallback;
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+    if (star) { try { return decodeURIComponent(star[1]); } catch { /* fall through */ } }
+    const plain = /filename="?([^";]+)"?/i.exec(cd);
+    return plain ? plain[1] : fallback;
+}
+
 export default function Analytics() {
     const [periods, setPeriods] = useState([]);
     const [period1, setPeriod1] = useState('');
@@ -45,7 +56,7 @@ export default function Analytics() {
             const res = await fn({ period_id: selPeriod });
             const ext = type === 'excel' ? 'xlsx' : 'pdf';
             const url = URL.createObjectURL(new Blob([res.data]));
-            const a = document.createElement('a'); a.href = url; a.download = `report.${ext}`; a.click();
+            const a = document.createElement('a'); a.href = url; a.download = filenameFromResponse(res, `report.${ext}`); a.click();
             URL.revokeObjectURL(url);
             toast.success('تم التصدير بنجاح');
         } catch { toast.error('خطأ في التصدير'); }

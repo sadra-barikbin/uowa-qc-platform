@@ -50,6 +50,8 @@ app.use(helmet({
 app.use(cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
+    // So the report export pages can read the server-set download filename cross-origin.
+    exposedHeaders: ['Content-Disposition'],
 }));
 
 // ── Rate limiting ─────────────────────────────────────────────
