@@ -422,8 +422,23 @@ function buildMenu() {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// How often to re-check for updates while the app stays open. electron-updater only checks when
+// asked, so without this a long-running install would never notice a new release until it was
+// restarted. 6 hours is frequent enough to catch a release the same day without hammering GitHub.
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+// Updater failures are otherwise invisible: the checks run in the background with no UI. Log locally
+// (startup.log) AND report to Sentry, so a broken update feed surfaces as an issue instead of failing
+// silently on every launch. Safe when Sentry is disabled — captureException is a no-op with no DSN.
+function reportUpdaterError(context, e) {
+    console.error(`[updater] ${context}`, e);
+    Sentry.captureException(e, { tags: { area: 'updater' }, extra: { context } });
+}
+
 function checkForUpdates() {
     if (!app.isPackaged) return; // updates only make sense for an installed build
+    // Registered once. Fires whenever a newer release finishes downloading — whether found by the
+    // startup check or a later periodic one — so the restart prompt covers mid-session updates too.
     autoUpdater.on('update-downloaded', async () => {
         const { response } = await dialog.showMessageBox({
             type: 'info',
@@ -434,7 +449,13 @@ function checkForUpdates() {
         });
         if (response === 0) { app.isQuitting = true; autoUpdater.quitAndInstall(); }
     });
-    autoUpdater.checkForUpdatesAndNotify().catch((e) => console.error('[updater]', e));
+    // Check once at startup (also raises the native "downloaded" toast), then re-check on an interval.
+    // A newer version auto-downloads and drives the handler above; if none is found the check is a
+    // no-op, and an already-downloaded update won't re-download or re-prompt, so this never nags.
+    autoUpdater.checkForUpdatesAndNotify().catch((e) => reportUpdaterError('startup check failed', e));
+    setInterval(() => {
+        autoUpdater.checkForUpdates().catch((e) => reportUpdaterError('periodic check failed', e));
+    }, UPDATE_CHECK_INTERVAL_MS);
 }
 
 // Single instance: a second launch focuses the existing window instead of starting
