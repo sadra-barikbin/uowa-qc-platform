@@ -5,8 +5,9 @@ import {
     Department, College, EvaluationPeriod, PeriodIndicator, Indicator,
     IndicatorCriterion, Evaluation,
 } from '../models';
-import { authenticate } from '../middleware/auth';
+import { authenticate, authorize } from '../middleware/auth';
 import { getIndicatorScores, getDepartmentScores, getCollegeScores } from '../utils/scores';
+import { renderReportPdf, registerReportFonts, ReportModel } from '../utils/reportPdf';
 
 const router = Router();
 
@@ -43,7 +44,7 @@ function num(v: string | number | null | undefined): number | null {
 
 // GET /api/reports/export/excel?period_id= — one sheet per indicator + two aggregation sheets,
 // mirroring the department's original manual report layout
-router.get('/export/excel', authenticate, async (req: Request, res: Response) => {
+router.get('/export/excel', authenticate, authorize('admin', 'qc_head'), async (req: Request, res: Response) => {
     const { period_id } = req.query as Record<string, string | undefined>;
     if (!period_id) return res.status(400).json({ error: 'period_id required' });
 
@@ -104,34 +105,55 @@ router.get('/export/excel', authenticate, async (req: Request, res: Response) =>
     res.send(buf);
 });
 
-// GET /api/reports/export/pdf?period_id=
-router.get('/export/pdf', authenticate, async (req: Request, res: Response) => {
+// GET /api/reports/export/pdf?period_id= — the same composite + per-college rollup as the Excel
+// export, rendered as an Arabic (RTL) PDF. See utils/reportPdf.ts for the layout/shaping machinery.
+router.get('/export/pdf', authenticate, authorize('admin', 'qc_head'), async (req: Request, res: Response) => {
     const { period_id } = req.query as Record<string, string | undefined>;
     if (!period_id) return res.status(400).json({ error: 'period_id required' });
-    const { period, departments, departmentScoreMap } = await loadReportData(period_id);
 
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
-    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="report.pdf"` });
-    doc.pipe(res);
+    const { period, departments, periodIndicators, indicatorScoreMap, departmentScoreMap, collegeScoreMap } = await loadReportData(period_id);
+    if (!period) return res.status(404).json({ error: 'Period not found' });
 
-    doc.fontSize(18).text('University QC Report', { align: 'center' });
-    doc.fontSize(12).text(`Period: ${period?.label_en || period_id}`, { align: 'center' });
-    doc.moveDown();
+    // Per-college, per-indicator averages — mirrors the "التقييم الكلية" sheet in the Excel export.
+    const colleges = [...new Map(departments.map(d => [d.college?.id, d.college]).filter((entry): entry is [string, College] => !!entry[0])).values()];
 
-    departments.forEach(dept => {
-        const score = departmentScoreMap[dept.id];
-        const pct = score != null ? Number(score) * 100 : null;
-        doc.fontSize(11).text(`${dept.name_en} (${dept.name_ar})`, { continued: true });
-        doc.fillColor(pct == null ? 'gray' : pct >= 90 ? 'green' : pct >= 70 ? 'orange' : 'red')
-           .text(pct == null ? ' — not scored' : ` — ${pct.toFixed(1)}%`)
-           .fillColor('black');
+    const model: ReportModel = {
+        title: 'تقرير الأداء',
+        periodLabel: period.label_ar || `${period.month}/${period.year}`,
+        indicators: periodIndicators.map(pi => pi.indicator!.name_ar),
+        departments: departments.map(dept => ({
+            name: dept.name_ar,
+            cells: periodIndicators.map(pi => num(indicatorScoreMap[`${dept.id}__${pi.indicator_id}`])),
+            final: num(departmentScoreMap[dept.id]),
+        })),
+        colleges: colleges.map(college => {
+            const collegeDepts = departments.filter(d => d.college_id === college.id);
+            return {
+                name: college.name_ar,
+                cells: periodIndicators.map(pi => {
+                    const vals = collegeDepts.map(d => indicatorScoreMap[`${d.id}__${pi.indicator_id}`]).filter((v): v is string => v != null);
+                    return vals.length ? num(vals.reduce((a, b) => a + Number(b), 0) / vals.length) : null;
+                }),
+                final: num(collegeScoreMap[college.id]),
+            };
+        }),
+        generatedAt: new Date().toLocaleDateString('en-GB'),
+    };
+
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40 });
+    registerReportFonts(doc);
+    const filename = `report-${period.year}-${String(period.month).padStart(2, '0')}.pdf`;
+    res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(period.label_ar || filename)}.pdf`,
     });
-
+    doc.pipe(res);
+    renderReportPdf(doc, model);
     doc.end();
 });
 
 // GET /api/reports/comparison?period1_id=&period2_id=
-router.get('/comparison', authenticate, async (req: Request, res: Response) => {
+router.get('/comparison', authenticate, authorize('admin', 'qc_head'), async (req: Request, res: Response) => {
     const { period1_id, period2_id } = req.query as Record<string, string | undefined>;
     if (!period1_id || !period2_id) return res.status(400).json({ error: 'Both period IDs required' });
 
