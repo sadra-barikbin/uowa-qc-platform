@@ -187,6 +187,9 @@ export async function aiEvaluateIndicator(
     // with one retry fails fast instead of hanging on the SDK's 10-min default (and burning
     // tokens on its default retries). Heavy scanned PDFs can still exceed this — handled below.
     const client = new Anthropic({ timeout: 120_000, maxRetries: 1 }); // reads ANTHROPIC_API_KEY from env
+    // Record which model/effort actually drove this grading run — surfaces the admin's selection
+    // in dev logs and the desktop startup.log, so a mis-wired or ignored setting is visible.
+    console.log(`[ai-eval] model=${model} effort=${effort} indicator="${indicator.name_ar}" criteria=${gradable.length}`);
     let response;
     try {
         response = await client.messages.create({
