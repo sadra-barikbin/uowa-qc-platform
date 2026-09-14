@@ -12,16 +12,38 @@ export default function Settings() {
     const [saving, setSaving] = useState(false);
     const taRef = useRef(null);
 
+    // Model + reasoning-effort selection.
+    const [models, setModels] = useState([]);
+    const [efforts, setEfforts] = useState([]);
+    const [model, setModel] = useState('');
+    const [effort, setEffort] = useState('');
+    const [savedModel, setSavedModel] = useState('');
+    const [savedEffort, setSavedEffort] = useState('');
+    const [savingCfg, setSavingCfg] = useState(false);
+
     useEffect(() => {
-        settingsAPI.getAiEvalPrompt()
-            .then(r => {
-                setValue(r.data.value || ''); setSavedValue(r.data.value || '');
-                setDefaultValue(r.data.default || ''); setVariables(r.data.variables || []);
-                setIsDefault(!!r.data.is_default);
+        Promise.all([settingsAPI.getAiEvalPrompt(), settingsAPI.getAiEvalConfig()])
+            .then(([p, c]) => {
+                setValue(p.data.value || ''); setSavedValue(p.data.value || '');
+                setDefaultValue(p.data.default || ''); setVariables(p.data.variables || []);
+                setIsDefault(!!p.data.is_default);
+                setModels(c.data.models || []); setEfforts(c.data.efforts || []);
+                setModel(c.data.model || ''); setEffort(c.data.effort || '');
+                setSavedModel(c.data.model || ''); setSavedEffort(c.data.effort || '');
             })
             .catch(() => toast.error('تعذر تحميل الإعدادات'))
             .finally(() => setLoading(false));
     }, []);
+
+    const saveConfig = async () => {
+        setSavingCfg(true);
+        try {
+            await settingsAPI.saveAiEvalConfig({ model, effort });
+            setSavedModel(model); setSavedEffort(effort);
+            toast.success('تم حفظ إعدادات النموذج');
+        } catch (err) { toast.error(err.response?.data?.error || 'خطأ في الحفظ'); }
+        finally { setSavingCfg(false); }
+    };
 
     const insertVar = (name) => {
         const token = `{{${name}}}`;
@@ -59,6 +81,33 @@ export default function Settings() {
 
     return (
         <div>
+            <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+                <label className="form-label">النموذج ومستوى التفكير</label>
+                <p style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 0, marginBottom: 14 }}>
+                    نموذج الذكاء الاصطناعي المستخدم في التقييم الآلي، ومقدار «التفكير» المخصّص لكل عملية تقييم
+                    (مستوى أعلى = دقة أعلى مقابل وقت وتكلفة أكبر).
+                </p>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 240px' }}>
+                        <label className="form-label" style={{ fontSize: 12 }}>النموذج</label>
+                        <select className="form-select" style={{ width: '100%' }} value={model} onChange={e => setModel(e.target.value)}>
+                            {models.map(m => <option key={m.id} value={m.id}>{m.label_ar}</option>)}
+                        </select>
+                    </div>
+                    <div style={{ flex: '1 1 240px' }}>
+                        <label className="form-label" style={{ fontSize: 12 }}>مستوى التفكير</label>
+                        <select className="form-select" style={{ width: '100%' }} value={effort} onChange={e => setEffort(e.target.value)}>
+                            {efforts.map(e => <option key={e.id} value={e.id}>{e.label_ar}</option>)}
+                        </select>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2" style={{ marginTop: 16 }}>
+                    <button className="btn btn-primary" onClick={saveConfig} disabled={savingCfg || (model === savedModel && effort === savedEffort)}>
+                        {savingCfg ? 'جاري الحفظ...' : 'حفظ'}
+                    </button>
+                </div>
+            </div>
+
             <div className="flex items-center justify-between mb-4">
                 <p style={{ fontSize: 13, color: 'var(--gray-500)' }}>التوجيه العام الذي يتبعه المُقيِّم الآلي (الذكاء الاصطناعي) عند تقييم أدلة الأقسام</p>
                 <span className={`badge ${isDefault ? 'badge-gray' : 'badge-primary'}`}>{isDefault ? 'الوضع الافتراضي' : 'مخصّص'}</span>

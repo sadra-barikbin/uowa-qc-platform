@@ -110,6 +110,8 @@ export const settingsAPI = {
     getAiEvalPrompt: () => api.get('/settings/ai-eval-prompt'),
     saveAiEvalPrompt: (value) => api.put('/settings/ai-eval-prompt', { value }),
     resetAiEvalPrompt: () => api.delete('/settings/ai-eval-prompt'),
+    getAiEvalConfig: () => api.get('/settings/ai-eval-config'),
+    saveAiEvalConfig: (payload) => api.put('/settings/ai-eval-config', payload),
 };
 
 export const systemAPI = {
