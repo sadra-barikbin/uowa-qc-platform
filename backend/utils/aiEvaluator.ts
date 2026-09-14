@@ -6,6 +6,7 @@ import {
     Department, College, EvaluationPeriod, Setting,
 } from '../models';
 import { SETTING_AI_EVAL_PROMPT, DEFAULT_AI_EVAL_SYSTEM_PROMPT, renderSystemPrompt } from './aiPrompt';
+import { CriterionResult, finalCriterionScore, isDepartmentMismatch } from './aiScore';
 
 // Default to Sonnet 5 (fast, reads Arabic + PDFs well); override via env to escalate to Opus.
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
@@ -74,32 +75,11 @@ async function documentBlocks(doc: SubmissionDocument): Promise<Anthropic.Conten
     return [];
 }
 
-interface CriterionResult {
-    criterion_id: string;
-    score?: number;      // 0..1 — checklist (0/0.5/1) and percentage
-    met?: boolean;       // binary
-    confidence: number;  // 0..1
-    rationale: string;   // Arabic reasoning + citation
-}
-
 // Arabic description of the output the model must return for a given criterion type.
 function outputSpec(type: string): string {
     if (type === 'binary') return 'ثنائي — أعِد met=true إذا كان المعيار مستوفى وإلا met=false';
     if (type === 'checklist') return 'قائمة تحقق — أعِد score بإحدى القيم فقط: 0 (غير مستوفٍ) أو 0.5 (مستوفٍ جزئياً) أو 1 (مستوفٍ بالكامل)';
     return 'نسبة مئوية — أعِد score رقماً بين 0 و1 يعبّر عن نسبة الاستيفاء';
-}
-
-const snapChecklist = (v: number): number => [0, 0.5, 1].reduce((best, o) => (Math.abs(o - v) < Math.abs(best - v) ? o : best), 0);
-
-// Coerce the model's answer into the 0..1 score the criterion's type allows.
-function normalizeAiScore(type: string, r?: CriterionResult): number {
-    if (!r) return 0;
-    if (type === 'binary') {
-        if (typeof r.met === 'boolean') return r.met ? 1 : 0;
-        return r.score != null && Number(r.score) >= 0.5 ? 1 : 0; // fallback if the model returned a score
-    }
-    const s = Math.min(1, Math.max(0, Number(r.score ?? (r.met ? 1 : 0))));
-    return type === 'checklist' ? snapChecklist(s) : s;
 }
 
 export interface AiEvaluationResult {
@@ -188,7 +168,10 @@ export async function aiEvaluateIndicator(
         text: 'قيّم كل معيار مما سبق على حدة اعتماداً على مستنداته ووفق «نوع التقييم» المحدد له: '
             + 'للمعيار الثنائي أعِد met (true/false)، ولمعيار قائمة التحقق أعِد score بإحدى القيم 0 أو 0.5 أو 1، '
             + 'ولمعيار النسبة المئوية أعِد score رقماً بين 0 و1. وأعِد لكل معيار درجة ثقة confidence بين 0 و1 '
-            + 'وتبريراً موجزاً بالعربية يذكر اسم الملف والدليل. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
+            + 'وتبريراً موجزاً بالعربية يذكر اسم الملف والدليل. '
+            + 'وأعِد أيضاً لكل معيار الحقل department_match الذي يبيّن انتماء مستنداته للقسم المُقيَّم المذكور في تعليمات النظام: '
+            + '"match" إذا كانت تعود لهذا القسم بعينه، و"mismatch" إذا كانت تعود بوضوح لقسمٍ آخر ولو كان شقيقاً في الكلية نفسها، '
+            + 'و"not_stated" إذا لم تُحدِّد المستنداتُ القسمَ. استخدم أداة record_scores وأعِد النتائج لكل criterion_id كما هو.',
     });
 
     // Bound the call: a normal grading request runs well under a minute, so a 2-min ceiling
@@ -217,8 +200,13 @@ export async function aiEvaluateIndicator(
                                     score: { type: 'number', description: '0..1 — checklist (use 0, 0.5, or 1) and percentage criteria' },
                                     confidence: { type: 'number', description: '0..1' },
                                     rationale: { type: 'string' },
+                                    department_match: {
+                                        type: 'string',
+                                        enum: ['match', 'mismatch', 'not_stated'],
+                                        description: 'Whether the evidence belongs to the exact department being evaluated (named in the system prompt): "match" = this department; "mismatch" = clearly a different department, even a sibling in the same college; "not_stated" = the documents do not identify a department.',
+                                    },
                                 },
-                                required: ['criterion_id', 'confidence', 'rationale'],
+                                required: ['criterion_id', 'confidence', 'rationale', 'department_match'],
                             },
                         },
                     },
@@ -245,9 +233,14 @@ export async function aiEvaluateIndicator(
     const evaluated: AiEvaluationResult['evaluated'] = [];
     for (const c of gradable) {
         const r = byId[c.id];
-        const score = normalizeAiScore(c.criterion_type, r);
+        const score = finalCriterionScore(c.criterion_type, r);
         const confidence = r && r.confidence != null ? Math.min(1, Math.max(0, Number(r.confidence))) : null;
-        const rationale = r?.rationale || 'لم يُرجِع النموذج نتيجة لهذا المعيار.';
+        // Surface the deterministic provenance gate in the reviewer-visible rationale, so a forced
+        // zero is explained rather than looking like the model simply scored it 0.
+        const baseRationale = r?.rationale || 'لم يُرجِع النموذج نتيجة لهذا المعيار.';
+        const rationale = isDepartmentMismatch(r)
+            ? `⚠️ تم ضبط الدرجة إلى صفر آلياً: الدليل يعود لقسمٍ آخر غير «${deptName}». ${baseRationale}`
+            : baseRationale;
         const submission = subByCriterion[c.id];
 
         const [evaluation, created] = await Evaluation.findOrCreate({
