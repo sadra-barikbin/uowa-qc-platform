@@ -1,6 +1,6 @@
 {
   "name": "uowa-qc-desktop",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "University QC Platform — desktop app (self-contained, auto-updating)",
   "author": "UOWA QC Unit",
   "main": "main.js",

@@ -7,9 +7,10 @@ import {
 } from '../models';
 import { SETTING_AI_EVAL_PROMPT, DEFAULT_AI_EVAL_SYSTEM_PROMPT, renderSystemPrompt } from './aiPrompt';
 import { CriterionResult, finalCriterionScore, isDepartmentMismatch } from './aiScore';
-
-// Default to Sonnet 5 (fast, reads Arabic + PDFs well); override via env to escalate to Opus.
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+import {
+    SETTING_AI_EVAL_MODEL, SETTING_AI_EVAL_EFFORT, DEFAULT_AI_EVAL_MODEL,
+    normalizeModel, normalizeEffort, AiEffort,
+} from './aiConfig';
 // Must match where the submission routes actually store files: the desktop app points this at a
 // writable location (Electron's userData) via UPLOAD_DIR. A hardcoded backend/uploads made the AI
 // evaluator read from the wrong directory in the desktop build, so every criterion looked
@@ -118,11 +119,19 @@ export async function aiEvaluateIndicator(
     // Who/when this evaluation is for — the (admin-editable) system prompt uses these so the
     // model can catch evidence that is valid in form but belongs to a different department or
     // a different (older) evaluation cycle.
-    const [department, period, promptRow] = await Promise.all([
+    const [department, period, promptRow, modelRow, effortRow] = await Promise.all([
         Department.findByPk(department_id, { include: [{ model: College, as: 'college' }] }),
         EvaluationPeriod.findByPk(period_id),
         Setting.findByPk(SETTING_AI_EVAL_PROMPT),
+        Setting.findByPk(SETTING_AI_EVAL_MODEL),
+        Setting.findByPk(SETTING_AI_EVAL_EFFORT),
     ]);
+    // Admin-chosen model/effort win; else the ANTHROPIC_MODEL env escape hatch (for the model);
+    // else the built-in defaults. normalize* guards against a stale/invalid stored value.
+    const model = modelRow?.value
+        ? normalizeModel(modelRow.value)
+        : (process.env.ANTHROPIC_MODEL || DEFAULT_AI_EVAL_MODEL);
+    const effort: AiEffort = normalizeEffort(effortRow?.value);
     const deptName = department?.name_ar || '(غير محدد)';
     const collegeName = department?.college?.name_ar;
     const periodLabel = period?.label_ar || (period ? `${period.month}/${period.year}` : '(غير محددة)');
@@ -160,7 +169,7 @@ export async function aiEvaluateIndicator(
     }
 
     if (gradable.length === 0) {
-        return { model: MODEL, evaluated: [], skipped };
+        return { model, evaluated: [], skipped };
     }
 
     content.push({
@@ -178,11 +187,19 @@ export async function aiEvaluateIndicator(
     // with one retry fails fast instead of hanging on the SDK's 10-min default (and burning
     // tokens on its default retries). Heavy scanned PDFs can still exceed this — handled below.
     const client = new Anthropic({ timeout: 120_000, maxRetries: 1 }); // reads ANTHROPIC_API_KEY from env
+    // Record which model/effort actually drove this grading run — surfaces the admin's selection
+    // in dev logs and the desktop startup.log, so a mis-wired or ignored setting is visible.
+    console.log(`[ai-eval] model=${model} effort=${effort} indicator="${indicator.name_ar}" criteria=${gradable.length}`);
     let response;
     try {
         response = await client.messages.create({
-            model: MODEL,
+            model,
             max_tokens: 4000,
+            // Adaptive thinking on, with the admin-chosen effort controlling reasoning depth
+            // (default 'high' == omitting effort). All selectable models run adaptive thinking
+            // and support forced tool use, so this coexists with the pinned record_scores call.
+            thinking: { type: 'adaptive' },
+            output_config: { effort },
             system: systemPrompt,
             tools: [{
                 name: 'record_scores',
@@ -261,5 +278,5 @@ export async function aiEvaluateIndicator(
         evaluated.push({ criterion_id: c.id, name_ar: c.name_ar, score, confidence: confidence ?? 0, rationale });
     }
 
-    return { model: MODEL, evaluated, skipped };
+    return { model, evaluated, skipped };
 }
